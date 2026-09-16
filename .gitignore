@@ -1,0 +1,9 @@
+.venv/
+.agent_state/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.DS_Store
+.playwright-mcp/

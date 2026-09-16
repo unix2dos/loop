@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Levon · Agent 实验台</title><link rel="icon" href="data:,">
+<style>
+:root{color-scheme:light;--ink:#273143;--muted:#707b8c;--line:#e6eaf0;--blue:#4775e6}
+*{box-sizing:border-box}body{margin:0;color:var(--ink);background:#f5f6f9;font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}
+button,input,textarea,select{font:inherit;color:inherit}button,select{background:white;border:1px solid #dce2ea;border-radius:7px;padding:7px 12px}button{cursor:pointer;white-space:nowrap}button:hover{background:#f1f5ff}button:disabled{opacity:.45;cursor:default}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #b8ccff;outline-offset:2px}.primary{background:var(--blue);border-color:var(--blue);color:#fff}.primary:hover{background:#3763cf}.muted{color:var(--muted)}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 28px;background:white;border-bottom:1px solid var(--line)}.brand{font-size:17px;font-weight:650}.brand small{font-weight:400;font-size:12px;color:#929aaa;margin-left:15px}.badge{font-size:12px;background:#eaf5f0;color:#29745a;border-radius:5px;padding:4px 9px}
+main{max-width:1600px;margin:23px auto 35px;padding:0 26px}.workbench{background:white;border:1px solid #e0e5ed;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px #20385804}
+.head{padding:20px 24px 0}.head-top{display:flex;align-items:center;justify-content:space-between;gap:14px}.scope{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.history{font-size:12px;max-width:310px}.title-line{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:10px}h1{font-size:20px;line-height:1.5;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:620}.tabs{display:flex;gap:27px;margin-top:13px}.tabs button{background:transparent;border:0;border-radius:0;padding:10px 0;color:var(--muted)}.tabs button.active{color:var(--blue);box-shadow:inset 0 -3px var(--blue);font-weight:600}
+.toolbar{border-block:1px solid var(--line);padding:10px 24px;display:flex;gap:14px;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}.toolbar-right{display:flex;gap:14px;align-items:center}.search{width:210px;border:1px solid #dce2ea;border-radius:6px;padding:6px 9px}.follow{display:flex;align-items:center;gap:5px;white-space:nowrap}.follow input{accent-color:var(--blue)}
+.timeline{padding:14px 24px 15px;border-bottom:1px solid var(--line)}.axis,.lane{display:grid;grid-template-columns:75px 1fr}.axis{font:11px ui-monospace,SFMono-Regular,monospace;color:#8a96a7;margin-bottom:8px}.ticks{display:flex;justify-content:space-between}.lane{height:25px;align-items:center}.lane-name{font-size:12px;color:#7d899b}.track{position:relative;height:16px;background:repeating-linear-gradient(to right,#edf0f5 0,#edf0f5 1px,transparent 1px,transparent 25%)}.bar{position:absolute;top:3px;height:10px;min-width:5px;padding:0;border:0;border-radius:2px;background:var(--tone);opacity:.75}.bar:hover{background:var(--tone);opacity:1}.bar.selected{outline:2px solid var(--tone);outline-offset:3px;opacity:1}.bar.failed{outline:1px solid #c14a4a}.bar.running{background:repeating-linear-gradient(45deg,var(--tone),var(--tone) 6px,var(--tint) 6px,var(--tint) 10px)}.timeline-note{font-size:11px;color:#8c97a6;margin:8px 0 0 75px}
+.trace-body{display:grid;grid-template-columns:minmax(0,1fr) 420px;height:clamp(440px,50vh,650px)}.events-wrap,.inspector{min-width:0;overflow:auto}.events-heading{padding:11px 22px 7px;display:flex;justify-content:space-between;color:#8a95a5;font-size:11px;position:sticky;top:0;background:#fff;z-index:1}.event{display:grid;grid-template-columns:29px 80px minmax(0,1fr) 48px;align-items:start;gap:9px;width:100%;text-align:left;border:0;border-bottom:1px solid #f0f2f6;border-radius:0;padding:12px 18px 12px 22px;position:relative;background:#fff}.event:hover{background:#f7f9ff}.event.selected{background:#eff4ff}.event.selected:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue)}.index,.duration{color:#919daf;font:11px/22px ui-monospace,SFMono-Regular,monospace}.duration{text-align:right}.role{font-size:10px;letter-spacing:.5px;font-weight:650;color:var(--tone);background:var(--tint);padding:2px 6px;border-radius:4px;width:max-content;max-width:80px;margin-top:1px}.event-main{min-width:0}.event-title,.event-summary{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.event-title{font-size:13px}.event-summary{font-size:12px;color:#8592a4;margin-top:3px}.event.failed .event-summary{color:#ae4747}.empty{padding:65px 24px;color:var(--muted);text-align:center}.empty strong{display:block;color:#45556d;font-weight:550;margin-bottom:9px}
+.inspector{border-left:1px solid var(--line);background:#fcfcfe}.detail-head{padding:17px 20px 0}.detail-meta{display:flex;align-items:center;justify-content:space-between;gap:10px}.node-id{font:11px ui-monospace,SFMono-Regular,monospace;color:#929caf}.detail-head h2{font-size:17px;line-height:1.5;margin:13px 0 5px}.detail-sub{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.detail-tabs{display:flex;gap:21px;margin-top:12px;border-bottom:1px solid var(--line)}.detail-tabs button{background:transparent;padding:9px 0;border:0;border-radius:0;font-size:12px;color:var(--muted)}.detail-tabs button.active{color:var(--blue);box-shadow:inset 0 -2px var(--blue)}.detail-content{padding:17px 20px 24px}.detail-content p{font-size:13px;line-height:1.85;color:#4f5d71;margin:0 0 15px}.label{font-size:11px;color:#7e8a9c;margin:17px 0 7px}.label:first-child{margin-top:0}.json,.code{margin:7px 0 13px;padding:12px;background:#f2f4f8;border:1px solid #e6eaf1;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.85 ui-monospace,SFMono-Regular,Menlo,monospace;color:#40526c;max-height:480px;overflow:auto}.code{white-space:pre;overflow-wrap:normal}.explain{padding:3px 0 3px 12px;border-left:3px solid #bdcff9;margin:16px 0}.note{font-size:11px;color:#8a96a7;line-height:1.8}.facts{display:grid;grid-template-columns:80px 1fr;gap:7px;font-size:12px;color:#526077}.facts dt{color:#8b96a5}.facts dd{margin:0}
+.statusbar{border-top:1px solid var(--line);padding:11px 22px;display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:12px}.status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#408a6c;margin-right:7px}.composer{border-top:1px solid var(--line);padding:16px 22px 18px;background:#fff}.composer textarea{width:100%;min-height:72px;max-height:190px;resize:vertical;border:1px solid #dde3ec;border-radius:8px;padding:12px 14px;line-height:1.8;font-size:13px;background:#fcfdff}.composer-bottom{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:10px}.settings{display:flex;align-items:center;gap:15px;font-size:12px;color:var(--muted)}.settings select{font-size:12px;padding:4px 6px}.helper{font-size:11px;color:#8b95a4}.error-box{display:none;background:#fff1f0;color:#a33a37;border:1px solid #f3d6d3;border-radius:6px;padding:9px 12px;margin-bottom:12px;font-size:12px}.after-note{font-size:11px;color:#8b95a6;margin-top:11px}.chat{display:none;min-height:380px;padding:24px;max-width:1000px;margin:auto}.message{white-space:pre-wrap;overflow-wrap:anywhere;padding:17px 20px;border:1px solid var(--line);border-radius:9px;margin:15px 0;line-height:1.9}.message.user{background:#f2f5ff;margin-left:12%}.message small{display:block;color:var(--muted);font-size:11px;margin-bottom:5px}.chat-placeholder{color:var(--muted);padding:40px 0;text-align:center}
+.kind-input{--tone:#788799;--tint:#eef1f5}.kind-model{--tone:#8668b2;--tint:#f0ebf7}.kind-tool{--tone:#bc701f;--tint:#fff3e5}.kind-control{--tone:#308367;--tint:#eaf5ef}
+@media(max-width:1050px){.trace-body{grid-template-columns:minmax(0,1fr) 350px}.event{grid-template-columns:23px 70px minmax(0,1fr);padding-left:14px;gap:5px}.event .duration{display:none}.role{font-size:9px}.helper{display:none}main{padding:0 14px}.history{max-width:230px}}
+@media(max-width:720px){.topbar{padding:12px 15px}.brand small{display:none}.badge{font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}main{padding:0 8px;margin-top:12px}.head{padding:15px 14px 0}.head-top{display:block}.history{margin-top:9px;width:100%;max-width:100%}h1{font-size:17px}.title-line{align-items:flex-start}.title-line button{font-size:11px;padding:5px 7px}.toolbar{padding:9px 12px;flex-wrap:wrap}.toolbar-right{width:100%;justify-content:space-between}.search{width:180px}.timeline{padding:12px}.axis,.lane{grid-template-columns:62px 1fr}.timeline-note{margin-left:62px}.trace-body{grid-template-columns:1fr;grid-template-rows:310px minmax(380px,auto);height:auto}.inspector{border-left:0;border-top:1px solid var(--line)}.statusbar{flex-direction:column;gap:4px;padding:10px 13px}.composer{padding:13px}.composer-bottom{align-items:flex-end}.settings{display:block}.settings label{display:block;margin-bottom:5px}.chat{padding:14px}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="brand">Levon<small>看清 Agent 的每一步</small></div><span class="badge" id="model-label">正在读取配置</span></header>
+<main><section class="workbench">
+<div class="head"><div class="head-top"><div class="scope" id="workspace-label"></div><select id="history" class="history" aria-label="选择本次服务的运行记录"><option value="">尚无运行记录</option></select></div><div class="title-line"><h1 id="title">运行一次任务，观察它怎样完成</h1><button id="download" disabled>导出轨迹 ↓</button></div><nav class="tabs" aria-label="查看方式"><button id="chat-tab">对话</button><button id="trace-tab" class="active">轨迹</button></nav></div>
+<section id="trace">
+<div class="toolbar"><span id="metrics">等待首次运行</span><div class="toolbar-right"><label class="follow"><input type="checkbox" id="follow" checked>跟随最新事件</label><input type="search" id="search" class="search" placeholder="搜索事件或工具…" aria-label="搜索事件或工具"></div></div>
+<div class="timeline"><div class="axis"><span>实际耗时</span><div class="ticks" id="ticks"></div></div><div id="lanes"></div><p class="timeline-note">色块来自实际运行事件。点击查看输入、输出和本次运行的代码。</p></div>
+<div class="trace-body"><section class="events-wrap" aria-label="运行事件"><div class="events-heading"><span>运行事件</span><span id="event-count"></span></div><div id="events"><div class="empty"><strong>还没有轨迹</strong>在下方提交一项只读任务，模型请求和工具结果会出现在这里。</div></div></section><aside class="inspector" aria-label="事件详情"><div id="detail-head" class="detail-head"></div><div id="detail-content" class="detail-content"><p>选择一个事件，在这里查看它的证据与核心代码。</p></div></aside></div>
+</section>
+<section class="chat" id="chat" aria-label="本次任务对话"><div id="chat-content" class="chat-placeholder">提交任务后，查看输入与最终回答。</div></section>
+<div class="statusbar"><span id="status" aria-live="polite">尚未运行</span><span id="run-id"></span></div>
+<form class="composer" id="task-form"><div class="error-box" id="error" role="alert"></div><textarea id="task" maxlength="4000" required aria-label="只读任务" placeholder="让 Agent 读取一章书，解释一个问题，并提供原文依据。"></textarea><div class="composer-bottom"><div class="settings"><label>模型请求上限 <select id="budget" aria-label="模型请求上限"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label><span id="access">列目录 / 读 Markdown</span><span class="helper">修改额度后提交新任务，比较停止位置。</span></div><button class="primary" id="submit" disabled>运行任务 →</button></div></form>
+</section><p class="after-note">真实调用模型，使用本机环境中的模型配置。每次提交创建独立运行；关闭页面不会取消正在执行的请求。运行结束后仍需核对答案。</p></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pretty=v=>esc(JSON.stringify(v,null,2));
+const roles={input:'INPUT',model:'MODEL',tool:'TOOL',control:'HARNESS'};
+const lanes={input:'Input',model:'Model',tool:'Tools',control:'Harness'};
+const statuses={running:'运行中',completed:'运行已结束',budget_exhausted:'模型请求额度耗尽',failed:'运行失败'};
+let config=null,run=null,activeId=null,selected=null,detailTab='overview',busy=false,query='',pollTimer=null;
+function error(message){$('error').textContent=message;$('error').style.display=message?'block':'none';}
+async function api(path,options={}){
+ const response=await fetch(path,{cache:'no-store',...options});
+ const result=await response.json();
+ if(!response.ok)throw new Error(result.error||'请求失败');
+ return result;
+}
+function summary(e){
+ if(e.status==='running')return '正在执行，等待真实返回结果';
+ if(e.kind==='model')return 'finish_reason = '+(e.output?.finish_reason||'未取得响应')+(e.output?.message?.tool_calls?' · '+e.output.message.tool_calls.length+' 个工具请求':'');
+ if(e.kind==='tool')return e.output?.error?'工具返回错误：'+e.output.error:e.input.arguments;
+ if(e.output?.run_status)return statuses[e.output.run_status]+' · 任务结果尚未验收';
+ return e.explanation;
+}
+function duration(e){return e.status==='running'?Math.max(0,Date.now()/1000-run.created_at-e.t):e.d;}
+function render(){
+ if(!run)return;
+ $('title').textContent=run.task;$('title').title=run.task;
+ $('model-label').textContent='真实模型 · '+run.model;
+ $('download').disabled=false;
+ const events=run.events;
+ if($('follow').checked&&events.length)selected=events.at(-1).id;
+ if(!events.some(e=>e.id===selected))selected=events[0]?.id;
+ const seconds=run.duration??Math.max(0,Date.now()/1000-run.created_at);
+ const end=Math.max(1,seconds,...events.map(e=>e.t+duration(e)));
+ const scale=Math.max(1,Math.ceil(end*1.08));
+ $('ticks').innerHTML=[0,1,2,3,4].map(n=>'<span>'+(scale*n/4).toFixed(1)+'s</span>').join('');
+ $('lanes').innerHTML=Object.keys(lanes).map(kind=>'<div class="lane kind-'+kind+'"><span class="lane-name">'+lanes[kind]+'</span><div class="track">'+events.filter(e=>e.kind===kind).map(e=>'<button class="bar '+esc(e.status)+(e.id===selected?' selected':'')+'" data-event="'+esc(e.id)+'" title="'+esc(e.title)+'" aria-label="'+esc(e.title)+'" style="left:'+(e.t/scale*100)+'%;width:'+Math.max(.35,duration(e)/scale*100)+'%"></button>').join('')+'</div></div>').join('');
+ const filtered=events.filter(e=>(e.title+' '+summary(e)+' '+roles[e.kind]).toLowerCase().includes(query));
+ $('events').innerHTML=filtered.length?filtered.map((e)=>'<button class="event kind-'+e.kind+' '+e.status+(e.id===selected?' selected':'')+'" data-event="'+esc(e.id)+'" aria-pressed="'+(e.id===selected)+'"><span class="index">'+e.id.slice(1)+'</span><span class="role">'+roles[e.kind]+'</span><span class="event-main"><span class="event-title">'+esc(e.title)+'</span><span class="event-summary">'+esc(summary(e))+'</span></span><span class="duration">'+(e.status==='running'?'进行中':e.d.toFixed(2)+'s')+'</span></button>').join(''):'<div class="empty">没有匹配的事件。</div>';
+ $('event-count').textContent=filtered.length+' / '+events.length+' 个事件';
+ $('metrics').textContent=run.model_requests+' 次模型请求 · '+run.tool_calls+' 次工具调用 · '+seconds.toFixed(1)+'s';
+ $('status').textContent=statuses[run.status]+(run.status==='running'?' · 当前请求超时设置为 60 秒':run.status==='completed'?' · 任务结果待你核对':' · 任务未完成')+(run.tool_errors?' · '+run.tool_errors+' 次工具错误':'');
+ $('run-id').textContent=run.id.slice(0,10);
+ const e=events.find(e=>e.id===selected);
+ if(e){
+  const turnLabel=e.turn?'第 '+e.turn+' 次模型请求':'模型请求前';
+  $('detail-head').innerHTML='<div class="detail-meta kind-'+e.kind+'"><span class="role">'+roles[e.kind]+'</span><span class="node-id">'+e.id+' · '+turnLabel+'</span></div><h2>'+esc(e.title)+'</h2><div class="detail-sub">'+esc(summary(e))+'</div><div class="detail-tabs">'+[['overview','这步发生了什么'],['io','输入 / 输出'],['code','核心代码']].map(([id,label])=>'<button data-tab="'+id+'" class="'+(detailTab===id?'active':'')+'">'+label+'</button>').join('')+'</div>';
+  const source=run.source[e.code];
+  let content='';
+  if(detailTab==='overview')content='<p>'+esc(e.explanation)+'</p><dl class="facts"><dt>实际状态</dt><dd>'+esc({running:'执行中',succeeded:'已返回',failed:'失败或被拒绝'}[e.status])+'</dd><dt>开始位置</dt><dd>'+e.t.toFixed(3)+'s</dd><dt>关联实现</dt><dd>'+esc(source.path)+':'+source.line+'</dd></dl><div class="label">实际返回</div><pre class="json">'+(e.status==='running'?'等待返回…':pretty(e.output))+'</pre>';
+  if(detailTab==='io')content='<div class="label">实际输入</div><pre class="json">'+pretty(e.input)+'</pre><div class="label">实际输出</div><pre class="json">'+(e.status==='running'?'等待返回…':pretty(e.output))+'</pre><p class="note">这些字段来自本次执行记录；模型请求中的消息和工具定义没有用示例替换。</p>';
+  if(detailTab==='code')content='<div class="label">'+esc(source.path)+' · 第 '+source.line+' 行起</div><pre class="code">'+esc(source.code)+'</pre><div class="explain"><p>'+esc(e.explanation)+'</p></div><p class="note">这是本次运行开始时保存的源码片段。先预测改动一条规则会怎样，再提交一次新实验核对。</p>';
+  $('detail-content').innerHTML=content;
+ }
+ $('chat-content').className='';
+ $('chat-content').innerHTML='<div class="message user"><small>用户任务</small>'+esc(run.task)+'</div><div class="message"><small>模型回答</small>'+esc(run.answer||(run.status==='running'?'任务正在运行，尚无最终回答。':'本次没有产生最终回答。请到轨迹中查看停止原因。'))+'</div>';
+ $('submit').disabled=busy||!config?.configured;
+ $('submit').textContent=busy?'正在运行…':'运行任务 →';
+}
+async function refreshHistory(){
+ const items=await api('/api/runs');
+ busy=items.some(item=>item.status==='running');
+ $('history').innerHTML=items.length?items.map(item=>'<option value="'+item.id+'">'+esc((statuses[item.status]||item.status)+' · '+item.task.slice(0,24))+'</option>').join(''):'<option value="">尚无运行记录</option>';
+ if(activeId&&items.some(i=>i.id===activeId))$('history').value=activeId;
+ return items;
+}
+async function poll(){
+ if(!activeId)return;
+ const id=activeId;
+ try{
+  const snapshot=await api('/api/runs/'+id);
+  if(activeId!==id)return;
+  run=snapshot;
+  if(run.status!=='running')await refreshHistory();
+  render();
+  clearTimeout(pollTimer);
+  if(run.status==='running'||busy)pollTimer=setTimeout(poll,650);
+ }catch(e){error(e.message);busy=false;$('submit').disabled=!config?.configured;}
+}
+async function chooseRun(id){
+ activeId=id;selected=null;clearTimeout(pollTimer);error('');
+ const url=new URL(location.href);url.searchParams.set('run',id);historyReplace(url);
+ await poll();
+}
+function historyReplace(url){window.history.replaceState(null,'',url);}
+document.addEventListener('click',event=>{
+ const node=event.target.closest('[data-event]');
+ if(node){selected=node.dataset.event;$('follow').checked=false;render();document.querySelector('.event.selected')?.scrollIntoView({block:'nearest'});}
+ const tab=event.target.closest('[data-tab]');
+ if(tab){detailTab=tab.dataset.tab;render();}
+});
+$('search').addEventListener('input',event=>{query=event.target.value.trim().toLowerCase();render();});
+$('follow').onchange=()=>render();
+$('history').onchange=event=>chooseRun(event.target.value);
+function showView(view){$('trace').style.display=view==='trace'?'block':'none';$('chat').style.display=view==='chat'?'block':'none';$('trace-tab').classList.toggle('active',view==='trace');$('chat-tab').classList.toggle('active',view==='chat');}
+$('trace-tab').onclick=()=>showView('trace');$('chat-tab').onclick=()=>showView('chat');
+$('task-form').addEventListener('submit',async event=>{
+ event.preventDefault();error('');busy=true;$('submit').disabled=true;$('submit').textContent='提交中…';
+ try{
+  const result=await api('/api/runs',{method:'POST',headers:{'Content-Type':'application/json','X-Lab-Token':config.token},body:JSON.stringify({task:$('task').value,max_requests:Number($('budget').value)})});
+  $('follow').checked=true;showView('trace');await refreshHistory();await chooseRun(result.id);
+ }catch(e){error(e.message);busy=false;$('submit').disabled=!config?.configured;$('submit').textContent='运行任务 →';}
+});
+$('download').onclick=()=>{
+ if(!run)return;
+ const url=URL.createObjectURL(new Blob([JSON.stringify(run,null,2)],{type:'application/json'}));
+ const a=document.createElement('a');a.href=url;a.download='levon-run-'+run.id+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+(async()=>{
+ try{
+  config=await api('/api/config');
+  $('workspace-label').textContent='只读工作区：'+config.workspace;
+  $('model-label').textContent=config.configured?'真实模型 · '+config.model:'模型配置未就绪';
+  $('task').value=config.default_task;
+  $('submit').disabled=!config.configured;
+  if(!config.configured)error('请在启动服务的环境中设置 OPENAI_API_KEY 和 OPENAI_MODEL；兼容服务另设 OPENAI_BASE_URL。密钥只保留在服务端。');
+  const items=await refreshHistory(),requested=new URL(location.href).searchParams.get('run');
+  const id=items.find(i=>i.id===requested)?.id||items[0]?.id;
+  if(id)await chooseRun(id);
+ }catch(e){error('无法连接本机服务：'+e.message);}
+})();
+</script>
+</body>
+</html>

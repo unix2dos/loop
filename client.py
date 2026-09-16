@@ -1,0 +1,48 @@
+"""Provider-neutral model connection and read-only tool schemas."""
+
+import os
+
+
+TOOLS = [{'type': 'function',
+  'function': {'name': 'read_file',
+               'description': '分段读取 Workspace 内的 UTF-8 文本文件',
+               'parameters': {'type': 'object',
+                              'properties': {'path': {'type': 'string'},
+                                             'offset': {'type': 'integer', 'minimum': 0}},
+                              'required': ['path'],
+                              'additionalProperties': False}}},
+ {'type': 'function',
+  'function': {'name': 'list_files',
+               'description': '分页列出工作区内目录的普通文件名。next_offset 非 null 时可用它请求下一页。默认每页 20 个，最多 100 '
+                              '个；不递归、不读取内容、跳过软链接。',
+               'parameters': {'type': 'object',
+                              'properties': {'path': {'type': 'string', 'minLength': 1},
+                                             'offset': {'type': 'integer',
+                                                        'minimum': 0,
+                                                        'default': 0,
+                                                        'description': '排序后的文件名列表起始位置，从 0 '
+                                                                       '开始，按条目计数。'},
+                                             'limit': {'type': 'integer',
+                                                       'minimum': 1,
+                                                       'maximum': 100,
+                                                       'default': 20}},
+                              'required': ['path'],
+                              'additionalProperties': False}}}]
+
+
+def make_client() -> tuple[object, str]:
+    try:
+        from openai import OpenAI
+    except ImportError as error:
+        raise RuntimeError(
+            "缺少 openai 包，请运行：python -m pip install openai"
+        ) from error
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    model = os.getenv("OPENAI_MODEL")
+    if not api_key or not model:
+        raise RuntimeError("请设置 OPENAI_API_KEY 和 OPENAI_MODEL")
+    return OpenAI(
+        api_key=api_key,
+        base_url=os.getenv("OPENAI_BASE_URL") or None,
+    ), model
