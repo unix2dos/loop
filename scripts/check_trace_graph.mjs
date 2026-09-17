@@ -1,4 +1,4 @@
-import {conversationHeads, conversationID} from "../web/dist/conversation.js";
+import {conversationHeads, conversationID, conversationOverview, traceKey} from "../web/dist/conversation.js";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildTraceGraph, relatedEvents, sameJSON, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from '../web/dist/trace-graph.js';
@@ -28,6 +28,18 @@ check('对话侧栏合并连续轮次，旧运行保持独立', () => {
  assert.deepEqual(conversationHeads([next,root,old]).map(x=>x.id),['next','legacy']);
  assert.equal(conversationID(old),'legacy');
  assert.deepEqual(conversationHeads([root,next]).map(x=>x.id),['next']);
+});
+check('整段对话保留重复事件 ID 的归属，用量与执行时间跨轮累计', () => {
+ const first={...example(),id:'first',created_at:100,duration:2,model_requests:2,tool_calls:2};
+ const second={...example(),id:'second',conversation_turn:2,created_at:900,duration:3,model_requests:2,tool_calls:2};
+ first.events[0].output.usage={total_tokens:10};second.events[0].output.usage={total_tokens:20};
+ const before=JSON.stringify([first,second]);const overview=conversationOverview([first,second],903);
+ assert.equal(overview.duration,5);assert.equal(overview.modelRequests,4);assert.equal(overview.toolCalls,4);
+ assert.equal(overview.eventCount,12);assert.equal(overview.events.length,12);assert.equal(runUsage(overview).total.total,30);
+ assert.deepEqual(overview.turns.map(t=>[t.number,t.start,t.firstStep]),[[1,0,0],[2,2,6]]);
+ assert.notEqual(traceKey('first','e001'),traceKey('second','e001'));
+ assert.equal(JSON.stringify([first,second]),before);
+ second.status='running';assert.equal(conversationOverview([first,second],904).duration,6);
 });
 check('同一响应的两个调用分别配对，错误回执也进入下一次请求', () => {
   const graph = buildTraceGraph(example());

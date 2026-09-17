@@ -1,4 +1,4 @@
-import { conversationID, conversationHeads } from "./conversation.js";
+import { conversationID, conversationHeads, conversationOverview, traceKey } from "./conversation.js";
 import { buildTraceGraph, object, relatedEvents, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from "./trace-graph.js";
 function $(id) {
     const element = document.getElementById(id);
@@ -19,7 +19,10 @@ let pollTimer;
 let openingRecord = false, recordFeedback = "";
 let conversation = [], conversationReady = false;
 const runCache = new Map();
-const batchStates = new Map();
+const batchStates = new Map(), turnStates = new Map();
+let selectedRunID = null;
+function selectedRun() { return conversation.find(item => item.id === selectedRunID) ?? run; }
+const nodeID = (runID, eventID) => `node-${runID}-${eventID}`;
 let items = [], page = "home";
 function readPreference(key, fallback = false) { try {
     const value = localStorage.getItem(key);
@@ -91,6 +94,66 @@ splitter.onkeydown = event => {
     savePreference("loop.conversationShare", conversationShare);
 };
 new ResizeObserver(() => updateSplitWidth()).observe(workbench);
+let traceListShare = .58;
+try {
+    const saved = Number(localStorage.getItem("loop.traceListShare"));
+    if (saved > 0 && saved < 1)
+        traceListShare = saved;
+}
+catch { /* Optional browser preference. */ }
+const detailDivider = $("detail-resize"), tracePane = $("trace-pane");
+function detailSpace() {
+    const header = tracePane.querySelector(".trace-heading").getBoundingClientRect();
+    return { top: header.bottom, available: tracePane.clientHeight - header.height - detailDivider.offsetHeight };
+}
+function updateDetailHeight(share) {
+    if (!detailOpen || !detailDivider.offsetHeight || !tracePane.clientHeight)
+        return;
+    const { available } = detailSpace();
+    if (available <= 0)
+        return;
+    const minList = Math.min(100, available * .4), minDetail = Math.min(160, available * .4);
+    const height = Math.max(minList, Math.min(available - minDetail, available * (share ?? traceListShare)));
+    if (share !== undefined)
+        traceListShare = height / available;
+    tracePane.style.setProperty("--trace-list-height", height + "px");
+    detailDivider.setAttribute("aria-valuenow", String(Math.round(height / available * 100)));
+    detailDivider.setAttribute("aria-valuemin", String(Math.ceil(minList / available * 100)));
+    detailDivider.setAttribute("aria-valuemax", String(Math.floor((available - minDetail) / available * 100)));
+    detailDivider.setAttribute("aria-valuetext", `轨迹列表 ${Math.round(height)} 像素，原始记录 ${Math.round(available - height)} 像素`);
+}
+let detailDragOffset = 0;
+detailDivider.onpointerdown = event => {
+    if (event.button !== 0 || !event.isPrimary)
+        return;
+    event.preventDefault();
+    detailDivider.focus();
+    detailDragOffset = event.clientY - detailDivider.getBoundingClientRect().top;
+    detailDivider.setPointerCapture(event.pointerId);
+    document.body.classList.add("resizing-detail");
+};
+detailDivider.onpointermove = event => {
+    if (!detailDivider.hasPointerCapture(event.pointerId))
+        return;
+    const { top, available } = detailSpace();
+    if (available > 0)
+        updateDetailHeight((event.clientY - top - detailDragOffset) / available);
+};
+detailDivider.onpointerup = event => { if (detailDivider.hasPointerCapture(event.pointerId))
+    detailDivider.releasePointerCapture(event.pointerId); };
+detailDivider.onlostpointercapture = () => { document.body.classList.remove("resizing-detail"); savePreference("loop.traceListShare", traceListShare); };
+detailDivider.ondblclick = () => { updateDetailHeight(.58); savePreference("loop.traceListShare", traceListShare); };
+detailDivider.onkeydown = event => {
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key))
+        return;
+    event.preventDefault();
+    const current = Number(detailDivider.getAttribute("aria-valuenow")) / 100;
+    updateDetailHeight(event.key === "Home" ? 0 : event.key === "End" ? 1 : current + (event.key === "ArrowUp" ? -.03 : .03));
+    savePreference("loop.traceListShare", traceListShare);
+};
+const detailObserver = new ResizeObserver(() => updateDetailHeight());
+detailObserver.observe(tracePane);
+detailObserver.observe(tracePane.querySelector(".trace-heading"));
 const number = (value) => value === undefined ? "未返回" : value.toLocaleString("zh-CN");
 function totalTokens(current) {
     const usage = runUsage(current);
@@ -123,6 +186,8 @@ function resetRunView() {
     conversation = [];
     conversationReady = false;
     runCache.clear();
+    turnStates.clear();
+    selectedRunID = null;
     run = null;
     activeId = null;
     selected = null;
@@ -290,10 +355,10 @@ function rowText(event) {
         return "交回工具回执 · " + String(event.output?.content ?? "");
     return event.title;
 }
-function eventRow(event, related) {
+function eventRow(current, event, related) {
     const usage = tokenUsage(event), text = rowText(event);
     const modelTokens = event.kind === "model" ? `<small>${usage.total === undefined ? event.status === "running" ? "等待用量" : "Token 未返回" : number(usage.total) + " tokens"}</small>` : "";
-    return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}"${rowRole(event) === "HARNESS" ? ' title="Harness 控制步骤，例如选择工具执行器。上下文准备、回执回填和停止控制也属于 Harness 的职责；此标签不是模型消息角色。"' : ""}>${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark" title="模型轮次：一次模型请求及其引发的工具处理；同批多个工具属于同一轮，不是用户对话轮次。">模型轮次 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
+    return `<button id="${nodeID(current.id, event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selectedRunID === current.id && selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-trace-run="${esc(current.id)}" data-event="${esc(event.id)}" aria-pressed="${selectedRunID === current.id && selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}"${rowRole(event) === "HARNESS" ? ' title="Harness 控制步骤，例如选择工具执行器。上下文准备、回执回填和停止控制也属于 Harness 的职责；此标签不是模型消息角色。"' : ""}>${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark" title="模型轮次：一次模型请求及其引发的工具处理；同批多个工具属于同一轮，不是用户对话轮次。">模型轮次 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
 }
 function callFor(id) {
     for (const step of graph.steps)
@@ -302,41 +367,52 @@ function callFor(id) {
                 return { call, model: step.model };
     return undefined;
 }
-function pointer(event) { return "/events/" + run.events.findIndex(item => item.id === event.id); }
-function renderGraph(current) {
-    const related = relatedEvents(graph, selected);
-    const elapsed = current.status === "running" ? Math.max(0, Date.now() / 1000 - current.created_at) : current.duration ?? 0;
-    const timeline = timelineLayout(current, "time", elapsed), steps = timelineLayout(current, "steps");
-    const lanes = [["input", "输入"], ["model", "模型"], ["tool", "工具"], ["control", "Harness"]];
-    const marker = (event, left, width, step = false) => `<button class="timeline-bar kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" style="left:${left * 100}%;width:${width * 100}%" aria-pressed="${selected === event.id}" aria-label="${step ? "步骤" : "耗时"} ${esc(event.id + " " + title(event))}" title="${esc(event.id + " · " + title(event) + " · " + (event.status === "running" ? "进行中" : formatDuration(event.d)))}">${step ? esc(event.id.replace(/^e0*/, "")) : ""}</button>`;
-    setHTML("timeline", `<div class="timeline-lane step-lane"><span>步骤</span><div class="step-track">${steps.bars.map(({ event, left, width }) => marker(event, left, width, true)).join("")}</div></div><div class="timeline-axis"><span>耗时</span><div>${[0, .5, 1].map(n => `<span>${(timeline.extent * n).toFixed(2)}s</span>`).join("")}</div></div>${lanes.map(([kind, label]) => `<div class="timeline-lane"><span>${label}</span><div class="lane-track">${timeline.bars.filter(bar => bar.event.kind === kind).map(({ event, left, width }) => marker(event, left, width)).join("")}</div></div>`).join("")}`);
-    let html = graph.unlinkedTools.length ? `<p class="stream-note">${graph.unlinkedTools.length} 条工具记录的调用来源尚未核对，以下按原始顺序保留。</p>` : "";
+function pointer(event) { return "/events/" + selectedRun().events.findIndex(item => item.id === event.id); }
+function runStream(current) {
+    const localGraph = buildTraceGraph(current);
+    const related = relatedEvents(localGraph, selectedRunID === current.id ? selected : null);
+    let html = localGraph.unlinkedTools.length ? `<p class="stream-note">${localGraph.unlinkedTools.length} 条工具记录的调用来源尚未核对，以下按原始顺序保留。</p>` : "";
     const sections = executionSections(current);
     for (const section of sections) {
-        const step = graph.steps.find(item => item.model.id === section.anchor.id);
+        const step = localGraph.steps.find(item => item.model.id === section.anchor.id);
         const rest = section.kind === "request" ? section.events.slice(1) : [];
         if (section.kind !== "request") {
-            html += `<section class="stream-section phase-${section.kind}" aria-label="${section.kind === "start" ? "任务与上下文" : "运行结束"}">${section.events.map(event => eventRow(event, related)).join("")}</section>`;
+            html += `<section class="stream-section phase-${section.kind}" aria-label="${section.kind === "start" ? "任务与上下文" : "运行结束"}">${section.events.map(event => eventRow(current, event, related)).join("")}</section>`;
             continue;
         }
-        html += `<section class="stream-section phase-request" aria-label="模型轮次 ${section.anchor.turn}">${eventRow(section.anchor, related)}`;
+        html += `<section class="stream-section phase-request" aria-label="模型轮次 ${section.anchor.turn}">${eventRow(current, section.anchor, related)}`;
         if (rest.length) {
-            const open = batchStates.get(section.anchor.id) ?? current.events.length <= 12;
+            const open = batchStates.get(traceKey(current.id, section.anchor.id)) ?? current.events.length <= 12;
             const names = rest.filter(event => event.kind === "tool").map(event => event.title);
             const errors = rest.filter(event => event.kind === "tool" && event.status === "failed").length;
-            html += `<button id="batch-${esc(section.anchor.id)}" class="batch-summary ${errors ? "has-error" : ""}" data-batch="${esc(section.anchor.id)}" aria-expanded="${open}" aria-controls="batch-events-${esc(section.anchor.id)}"><span class="disclosure-arrow">${open ? "▾" : "▸"}</span><span>${names.length ? names.length + " 个工具调用 · " + [...new Set(names)].map(esc).join("、") : "Harness 处理记录"}</span><small>${rest.length} 条事件${errors ? ` · ${errors} 次错误` : ""}</small></button><div id="batch-events-${esc(section.anchor.id)}" class="batch-events" ${open ? "" : "hidden"}>${rest.map(event => eventRow(event, related)).join("")}</div>`;
+            html += `<button id="batch-${current.id}-${esc(section.anchor.id)}" class="batch-summary ${errors ? "has-error" : ""}" data-batch="${esc(traceKey(current.id, section.anchor.id))}" data-trace-run="${current.id}" aria-expanded="${open}" aria-controls="batch-events-${current.id}-${esc(section.anchor.id)}"><span class="disclosure-arrow">${open ? "▾" : "▸"}</span><span>${names.length ? names.length + " 个工具调用 · " + [...new Set(names)].map(esc).join("、") : "Harness 处理记录"}</span><small>${rest.length} 条事件${errors ? ` · ${errors} 次错误` : ""}</small></button><div id="batch-events-${current.id}-${esc(section.anchor.id)}" class="batch-events" ${open ? "" : "hidden"}>${rest.map(event => eventRow(current, event, related)).join("")}</div>`;
             const forwarded = step?.calls.filter(call => call.nextModel) ?? [];
             if (forwarded.length)
-                html += `<button class="stream-receipt-link" data-event="${esc(forwarded[0].nextModel.id)}" data-part="/input/messages">↳ ${forwarded.length} 条回执已进入请求 ${forwarded[0].nextModel.turn} · 查看消息依据</button>`;
+                html += `<button class="stream-receipt-link" data-trace-run="${current.id}" data-event="${esc(forwarded[0].nextModel.id)}" data-part="/input/messages">↳ ${forwarded.length} 条回执已进入请求 ${forwarded[0].nextModel.turn} · 查看消息依据</button>`;
             else if (step?.calls.some(call => call.receipt))
-                html += `<p class="stream-note">${current.status === "budget_exhausted" ? "回执已记录；模型额度耗尽，没有下一次请求。" : "回执已记录，尚未观察到携带它的后续请求。"}</p>`;
+                html += `<p class="stream-note">${current.status === "budget_exhausted" ? "回执已记录；本轮模型额度耗尽，没有下一次模型请求。" : "回执已记录，本轮尚未观察到携带它的后续请求。"}</p>`;
         }
         html += "</section>";
     }
     if (!current.events.length)
         html = `<div class="empty-graph"><p>${current.status === "running" ? "等待第一个执行事件…" : "本次没有可用的执行事件，请查看运行状态。"}</p></div>`;
-    setHTML("graph", html);
-    $("event-count").textContent = `完整事件流 · ${current.events.length} 条`;
+    return html;
+}
+function renderGraph() {
+    const overview = conversationOverview(conversation), count = Math.max(1, overview.eventCount), extent = Math.max(.001, overview.duration);
+    const related = relatedEvents(graph, selected);
+    const marker = (current, event, left, width, step = false) => {
+        const isSelected = selectedRunID === current.id && selected === event.id;
+        return `<button class="timeline-bar kind-${event.kind} ${event.status} ${isSelected ? "selected" : ""} ${selectedRunID === current.id && related.has(event.id) ? "related" : ""}" data-trace-run="${current.id}" data-event="${esc(event.id)}" style="left:${left * 100}%;width:${width * 100}%" aria-pressed="${isSelected}" aria-label="${step ? "步骤" : "耗时"} Turn ${current.conversation_turn ?? 1} ${esc(event.id + " " + title(event))}" title="Turn ${current.conversation_turn ?? 1} · ${esc(event.id + " · " + title(event) + " · " + (event.status === "running" ? "进行中" : formatDuration(event.d)))}">${step ? esc(event.id.replace(/^e0*/, "")) : ""}</button>`;
+    };
+    const lanes = [["input", "输入"], ["model", "模型"], ["tool", "工具"], ["control", "Harness"]];
+    const timeBars = overview.turns.flatMap(turn => timelineLayout(turn.run, "time", turn.duration).bars.map(bar => ({ run: turn.run, event: bar.event, left: (turn.start + bar.event.t) / extent, width: (bar.event.status === "running" ? Math.max(0, turn.duration - bar.event.t) : bar.event.d) / extent })));
+    setHTML("timeline", `<div class="timeline-lane turn-lane"><span>Turn</span><div class="turn-track">${overview.turns.map(turn => `<button data-turn-focus="${turn.run.id}" style="left:${turn.firstStep / count * 100}%;width:${turn.run.events.length / count * 100}%" title="定位对话第 ${turn.number} 轮">Turn ${turn.number}</button>`).join("")}</div></div><div class="timeline-lane step-lane"><span>步骤</span><div class="step-track">${overview.turns.flatMap(turn => turn.run.events.map((event, index) => marker(turn.run, event, (turn.firstStep + index) / count, .76 / count, true))).join("")}</div></div><div class="timeline-axis" title="各轮实际执行耗时相加，不包含等待用户回复的时间"><span>执行</span><div>${[0, .5, 1].map(n => `<span>${(overview.duration * n).toFixed(2)}s</span>`).join("")}</div></div>${lanes.map(([kind, label]) => `<div class="timeline-lane"><span>${label}</span><div class="lane-track">${timeBars.filter(bar => bar.event.kind === kind).map(bar => marker(bar.run, bar.event, bar.left, bar.width)).join("")}</div></div>`).join("")}`);
+    setHTML("graph", overview.turns.map(turn => {
+        const open = turnStates.get(turn.run.id) ?? (conversation.length <= 3 || turn.run.id === conversation.at(-1)?.id);
+        return `<section class="trace-turn" id="turn-${turn.run.id}"><button id="turn-heading-${turn.run.id}" class="turn-heading" data-turn="${turn.run.id}" aria-expanded="${open}" aria-controls="turn-events-${turn.run.id}"><span class="turn-number">${open ? "▾" : "▸"} Turn ${turn.number}</span><span class="turn-task">${esc(turn.run.task)}</span><span class="turn-status ${turn.run.status}">${statuses[turn.run.status]}</span><span class="turn-metrics">${turn.run.model_requests} 模型轮次 · ${turn.run.tool_calls} 工具 · ${totalTokens(turn.run)} · ${formatDuration(turn.duration)}${turn.run.tool_errors ? ` · ${turn.run.tool_errors} 次工具错误` : ""}</span></button><div id="turn-events-${turn.run.id}" ${open ? "" : "hidden"}>${runStream(turn.run)}</div></section>`;
+    }).join(""));
+    $("event-count").textContent = `全对话 · ${conversation.length} Turns · ${overview.eventCount} 条事件`;
 }
 function explanation(event) {
     if (event.kind === "model") {
@@ -354,14 +430,17 @@ function explanation(event) {
     }
     return event.explanation;
 }
-function eventLink(event, label, part = "") { return `<button class="text-link" data-event="${esc(event.id)}" data-part="${esc(part)}"${part ? ' data-detail="io"' : ""}>${esc(label)} <span aria-hidden="true">↗</span></button>`; }
+function eventLink(event, label, part = "") { return `<button class="text-link" data-trace-run="${selectedRun().id}" data-event="${esc(event.id)}" data-part="${esc(part)}"${part ? ' data-detail="io"' : ""}>${esc(label)} <span aria-hidden="true">↗</span></button>`; }
 function renderDetail(current) {
     const event = current.events.find(item => item.id === selected);
-    if (!event)
+    if (!event) {
+        setHTML("detail-heading", "<h2>选择一个步骤查看原始记录</h2>");
+        setHTML("detail-content", "");
         return;
+    }
     const tabs = [["io", "原始记录"], ["code", "源码"], ["overview", "说明"]];
     document.querySelector(".trace-pane")?.classList.toggle("detail-open", detailOpen);
-    setHTML("detail-heading", `<div><span class="eyebrow">${roles[event.kind]} · ${esc(event.id)}</span><h2>${esc(title(event))}</h2></div><div class="detail-tabs" role="tablist" aria-label="步骤详情">${tabs.map(([id, label]) => `<button id="detail-tab-${id}" role="tab" aria-controls="detail-content" aria-selected="${detailTab === id}" data-tab="${id}" class="${detailTab === id ? "active" : ""}">${label}</button>`).join("")}</div><button id="detail-toggle" class="detail-toggle" data-toggle-detail aria-expanded="${detailOpen}" aria-controls="detail-content">${detailOpen ? "收起 ↓" : "展开记录 ↑"}</button>`);
+    setHTML("detail-heading", `<div><span class="eyebrow">Turn ${current.conversation_turn ?? 1} · ${roles[event.kind]} · ${esc(event.id)}</span><h2>${esc(title(event))}</h2></div><div class="detail-tabs" role="tablist" aria-label="步骤详情">${tabs.map(([id, label]) => `<button id="detail-tab-${id}" role="tab" aria-controls="detail-content" aria-selected="${detailTab === id}" data-tab="${id}" class="${detailTab === id ? "active" : ""}">${label}</button>`).join("")}</div><button id="detail-toggle" class="detail-toggle" data-toggle-detail aria-expanded="${detailOpen}" aria-controls="detail-content">${detailOpen ? "收起 ↓" : "展开记录 ↑"}</button>`);
     const source = current.source[event.code];
     const usage = tokenUsage(event);
     const stats = `<div class="detail-stats"><span>耗时 <b>${event.status === "running" ? "进行中" : formatDuration(event.d)}</b></span>${event.kind === "model" ? `<span>输入 <b>${number(usage.input)}</b></span><span>输出 <b>${number(usage.output)}</b></span><span>合计 <b>${number(usage.total)}</b></span>${usage.cached !== undefined ? `<span>其中缓存输入 <b>${number(usage.cached)}</b></span>` : ""}` : ""}</div>`;
@@ -403,6 +482,7 @@ function renderDetail(current) {
     else
         content = source ? `<div class="source-heading"><code>${esc(source.path)}:${source.line}</code><span>本次运行保存的函数源码</span></div><pre class="source-code">${esc(source.code)}</pre><p class="detail-note">关联到函数整体，未声称精确到执行语句。历史源码不会被当前文件覆盖。</p>` : '<p class="detail-note">这条历史记录没有对应的源码快照。</p>';
     setHTML("detail-content", stats + content);
+    updateDetailHeight();
 }
 async function loadConversation(current) {
     const rootID = conversationID(current);
@@ -428,7 +508,7 @@ async function loadConversation(current) {
 function renderConversation() {
     setHTML("conversation", conversation.map(turn => {
         const error = turn.events.find(event => event.kind === "tool" && event.status === "failed");
-        return `<section class="conversation-turn" aria-label="对话第 ${turn.conversation_turn ?? 1} 轮"><article class="message user-message"><div class="speaker"><span class="avatar">你</span><span>第 ${turn.conversation_turn ?? 1} 轮</span></div><p>${esc(turn.task)}</p></article><article class="message assistant-message"><div class="speaker"><span class="avatar agent-avatar">↻</span><span>Loop</span><button class="turn-trace ${turn.id === activeId ? "active" : ""}" data-run="${esc(turn.id)}" aria-pressed="${turn.id === activeId}">${turn.id === activeId ? "正在查看此轮轨迹" : "查看此轮轨迹 ↗"}</button></div>${turn.answer ? `<p>${esc(turn.answer)}</p>` : `<div class="answer-placeholder">${turn.status === "running" ? '<span class="waiting-dot"></span> 正在处理…' : "本轮未产生最终回答 · " + esc(statuses[turn.status])}</div>`}${error ? `<button class="error-link" data-run="${esc(turn.id)}" data-run-event="${esc(error.id)}">${turn.tool_errors} 次工具错误 · 查看本轮轨迹 ↗</button>` : ""}${turn.status === "completed" ? '<p class="acceptance-note">循环已结束 · 请对照工具结果核对回答</p>' : ""}</article></section>`;
+        return `<section class="conversation-turn" aria-label="对话第 ${turn.conversation_turn ?? 1} 轮"><article class="message user-message"><div class="speaker"><span class="avatar">你</span><span>第 ${turn.conversation_turn ?? 1} 轮</span></div><p>${esc(turn.task)}</p></article><article class="message assistant-message"><div class="speaker"><span class="avatar agent-avatar">↻</span><span>Loop</span><button class="turn-trace ${turn.id === selectedRunID ? "active" : ""}" data-run="${esc(turn.id)}" aria-pressed="${turn.id === selectedRunID}">${turn.id === selectedRunID ? "正在查看此轮轨迹" : "查看此轮轨迹 ↗"}</button></div>${turn.answer ? `<p>${esc(turn.answer)}</p>` : `<div class="answer-placeholder">${turn.status === "running" ? '<span class="waiting-dot"></span> 正在处理…' : "本轮未产生最终回答 · " + esc(statuses[turn.status])}</div>`}${error ? `<button class="error-link" data-run="${esc(turn.id)}" data-run-event="${esc(error.id)}">${turn.tool_errors} 次工具错误 · 查看本轮轨迹 ↗</button>` : ""}${turn.status === "completed" ? '<p class="acceptance-note">循环已结束 · 请对照工具结果核对回答</p>' : ""}</article></section>`;
     }).join(""));
 }
 function render() {
@@ -446,39 +526,46 @@ function render() {
     const taskTitle = conversation[0]?.task ?? current.task;
     $("conversation-title").textContent = taskTitle;
     $("conversation-title").title = taskTitle;
-    $("trace-title").textContent = `执行轨迹 · 对话第 ${current.conversation_turn ?? 1} 轮`;
-    graph = buildTraceGraph(current);
-    const previous = selected;
-    if ($("follow").checked && current.status === "running")
-        selected = current.events.at(-1)?.id ?? null;
-    if (!current.events.some(event => event.id === selected))
-        selected = graph.steps[0]?.model.id ?? current.events[0]?.id ?? null;
-    if (selected !== previous) {
+    $("trace-title").textContent = "执行轨迹 · 整段对话";
+    const head = conversation.at(-1) ?? current;
+    const previous = selectedRunID + ":" + selected;
+    if ($("follow").checked && head.status === "running") {
+        selectedRunID = head.id;
+        selected = head.events.at(-1)?.id ?? null;
+    }
+    const detail = selectedRun() ?? current;
+    selectedRunID = detail.id;
+    graph = buildTraceGraph(detail);
+    if (!detail.events.some(event => event.id === selected))
+        selected = graph.steps[0]?.model.id ?? detail.events[0]?.id ?? null;
+    if (selectedRunID + ":" + selected !== previous) {
         pointerPart = "";
         recordFeedback = "";
         if ($("follow").checked && selected) {
-            const section = executionSections(current).find(section => section.events.some(event => event.id === selected));
+            turnStates.set(detail.id, true);
+            const section = executionSections(detail).find(section => section.events.some(event => event.id === selected));
             if (section?.kind === "request")
-                batchStates.set(section.anchor.id, true);
+                batchStates.set(traceKey(detail.id, section.anchor.id), true);
         }
     }
     $("model-label").textContent = current.model;
     $("workspace-label").textContent = (current.workspace === config.workspace ? "只读工作区 · " : "历史工作区 · ") + current.workspace;
     $("workspace-label").title = current.workspace;
     $("run-id").textContent = "RUN " + current.id.slice(0, 8);
-    $("status").textContent = statuses[current.status];
-    $("status").dataset.status = current.status;
-    const seconds = current.status === "running" ? Math.max(0, Date.now() / 1000 - current.created_at) : current.duration ?? 0;
-    $("metrics").textContent = `${current.model_requests} 次模型 · ${current.tool_calls} 次工具 · ${totalTokens(current)} · ${formatDuration(seconds)}`;
-    $("trace-summary").textContent = `执行过程 · ${totalTokens(current)} · ${formatDuration(seconds)} ${traceCollapsed ? "‹" : "›"}`;
-    const usage = runUsage(current);
-    $("metrics").title = `输入 ${number(usage.input.total)}（${usage.input.count}/${usage.models} 次已知） · 输出 ${number(usage.output.total)}（${usage.output.count}/${usage.models} 次已知） · 缓存输入 ${number(usage.cached.total)}（输入子项，不重复计入总计）`;
+    $("status").textContent = statuses[head.status];
+    $("status").dataset.status = head.status;
+    const overview = conversationOverview(conversation);
+    $("metrics").textContent = `${conversation.length} Turns（对话轮次） · ${overview.modelRequests} 次模型请求 · ${overview.toolCalls} 次工具 · ${totalTokens(overview)} · 执行 ${formatDuration(overview.duration)}`;
+    $("trace-summary").textContent = `执行过程 · ${conversation.length} Turns · ${totalTokens(overview)} ${traceCollapsed ? "‹" : "›"}`;
+    const usage = runUsage(overview);
+    $("metrics").title = `累计执行耗时，不含轮间等待。输入 ${number(usage.input.total)} · 输出 ${number(usage.output.total)} · 缓存输入 ${number(usage.cached.total)}（输入子项，不重复计入）`;
     $("download").disabled = false;
+    $("download").textContent = conversation.length > 1 ? "导出对话 ↓" : "导出 ↓";
     renderConversation();
-    renderGraph(current);
-    renderDetail(current);
-    if ($("follow").checked && current.status === "running" && previous !== selected)
-        document.getElementById("node-" + selected)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    renderGraph();
+    renderDetail(detail);
+    if ($("follow").checked && head.status === "running" && previous !== selectedRunID + ":" + selected)
+        document.getElementById(nodeID(detail.id, selected ?? ""))?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 async function refreshHistory() {
     items = await api("/api/runs");
@@ -526,12 +613,16 @@ async function poll() {
 }
 async function chooseRun(id, changeURL = true) {
     page = "run";
-    batchStates.clear();
     conversationReady = false;
+    selectedRunID = id;
+    turnStates.set(id, true);
     const target = items.find(item => item.id === id);
     if (!run || !target || conversationID(run) !== conversationID(target)) {
         conversation = [];
         runCache.clear();
+        batchStates.clear();
+        turnStates.clear();
+        turnStates.set(id, true);
         $("task").value = "";
     }
     activeId = id;
@@ -554,16 +645,19 @@ async function chooseRun(id, changeURL = true) {
         updateURL(id);
     await poll();
 }
-function selectEvent(id, part = "", detail) {
-    if (!run?.events.some(event => event.id === id))
+function selectEvent(id, part = "", detail, runID = selectedRunID ?? run?.id) {
+    const current = conversation.find(item => item.id === runID);
+    if (!current?.events.some(event => event.id === id))
         return;
+    selectedRunID = current.id;
     selected = id;
     pointerPart = part;
     recordFeedback = "";
     detailOpen = true;
-    const section = executionSections(run).find(section => section.events.some(event => event.id === id));
+    turnStates.set(current.id, true);
+    const section = executionSections(current).find(section => section.events.some(event => event.id === id));
     if (section?.kind === "request")
-        batchStates.set(section.anchor.id, true);
+        batchStates.set(traceKey(current.id, section.anchor.id), true);
     $("follow").checked = false;
     detailTab = detail === "overview" || detail === "code" ? detail : "io";
     if (traceCollapsed) {
@@ -572,43 +666,84 @@ function selectEvent(id, part = "", detail) {
         applyLayout();
     }
     render();
-    const target = document.getElementById("node-" + id) ?? document.getElementById("receipt-" + id);
+    const target = document.getElementById(nodeID(current.id, id));
     target?.scrollIntoView({ block: "nearest", inline: "nearest" });
     target?.focus({ preventScroll: true });
 }
-async function openRecord() {
-    if (!run || !selected || !config || openingRecord)
+function focusTurn(id) {
+    const current = conversation.find(item => item.id === id);
+    if (!current)
         return;
-    const runID = run.id, eventID = selected, field = pointerPart;
+    turnStates.set(id, true);
+    selectedRunID = id;
+    selected = current.events.find(event => event.kind === "model")?.id ?? current.events[0]?.id ?? null;
+    pointerPart = "";
+    recordFeedback = "";
+    $("follow").checked = false;
+    if (traceCollapsed) {
+        traceCollapsed = false;
+        savePreference("loop.traceCollapsed", false);
+        applyLayout();
+    }
+    render();
+    document.getElementById("turn-" + id)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+async function openRecord() {
+    const current = selectedRun();
+    if (!current || !selected || !config || openingRecord)
+        return;
+    const runID = current.id, eventID = selected, field = pointerPart;
     openingRecord = true;
     recordFeedback = "";
-    renderDetail(run);
+    renderDetail(selectedRun());
     try {
         const result = await api(`/api/runs/${encodeURIComponent(runID)}/open-record`, {
             method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Token": config.token }, body: JSON.stringify({ event_id: eventID, field })
         });
-        if (run?.id === runID && selected === eventID && pointerPart === field)
+        if (selectedRunID === runID && selected === eventID && pointerPart === field)
             recordFeedback = `${result.editor} · ${result.path.split(/[\\/]/).at(-1)}:${result.line}`;
     }
     catch (error) {
-        if (run?.id === runID && selected === eventID && pointerPart === field)
+        if (selectedRunID === runID && selected === eventID && pointerPart === field)
             recordFeedback = message(error);
     }
     finally {
         openingRecord = false;
         if (run)
-            renderDetail(run);
+            renderDetail(selectedRun());
     }
 }
 document.addEventListener("click", event => {
     if (!(event.target instanceof Element))
         return;
     const batch = event.target.closest("[data-batch]")?.dataset.batch;
-    if (batch && run) {
-        batchStates.set(batch, !(batchStates.get(batch) ?? run.events.length <= 12));
+    if (batch) {
+        const ownerID = event.target.closest("[data-batch]")?.dataset.traceRun;
+        const owner = conversation.find(item => item.id === ownerID);
+        if (owner) {
+            batchStates.set(batch, !(batchStates.get(batch) ?? owner.events.length <= 12));
+            render();
+        }
+        return;
+    }
+    const turn = event.target.closest("[data-turn]")?.dataset.turn;
+    if (turn) {
+        turnStates.set(turn, !(turnStates.get(turn) ?? (conversation.length <= 3 || turn === conversation.at(-1)?.id)));
         render();
+        return;
+    }
+    const focus = event.target.closest("[data-turn-focus]")?.dataset.turnFocus;
+    if (focus) {
+        focusTurn(focus);
+        return;
     }
     const taskLink = event.target.closest("[data-run]");
+    if (taskLink?.dataset.run && event.target.closest(".conversation-turn")) {
+        focusTurn(taskLink.dataset.run);
+        if (taskLink.dataset.runEvent)
+            selectEvent(taskLink.dataset.runEvent, "", undefined, taskLink.dataset.run);
+        return;
+    }
     if (taskLink?.dataset.run) {
         const id = taskLink.dataset.run, eventID = taskLink.dataset.runEvent;
         const scroll = $("conversation").scrollTop;
@@ -643,7 +778,7 @@ document.addEventListener("click", event => {
     }
     const node = event.target.closest("[data-event]");
     if (node?.dataset.event)
-        selectEvent(node.dataset.event, node.dataset.part ?? "", node.dataset.detail);
+        selectEvent(node.dataset.event, node.dataset.part ?? "", node.dataset.detail, node.dataset.traceRun);
     const tab = event.target.closest("[data-tab]")?.dataset.tab;
     if (tab === "overview" || tab === "io" || tab === "code") {
         detailTab = tab;
@@ -702,10 +837,11 @@ $("task-form").addEventListener("submit", async (event) => {
 $("download").onclick = () => {
     if (!run)
         return;
-    const url = URL.createObjectURL(new Blob([JSON.stringify(run, null, 2)], { type: "application/json" }));
+    const output = conversation.length > 1 ? { conversation_id: conversationID(run), runs: conversation } : run;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(output, null, 2)], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "loop-run-" + run.id + ".json";
+    anchor.download = conversation.length > 1 ? "loop-conversation-" + conversationID(run) + ".json" : "loop-run-" + run.id + ".json";
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };

@@ -87,7 +87,7 @@ export function tokenUsage(event: TraceEvent): TokenUsage {
   const usage = object(event.output?.usage);
   return { input: tokenNumber(usage.prompt_tokens), output: tokenNumber(usage.completion_tokens), total: tokenNumber(usage.total_tokens), cached: tokenNumber(object(usage.prompt_tokens_details).cached_tokens) };
 }
-export function runUsage(run: Run): { models: number; input: { total?: number; count: number }; output: { total?: number; count: number }; total: { total?: number; count: number }; cached: { total?: number; count: number } } {
+export function runUsage(run: Pick<Run, "events">): { models: number; input: { total?: number; count: number }; output: { total?: number; count: number }; total: { total?: number; count: number }; cached: { total?: number; count: number } } {
   const values = run.events.filter(event => event.kind === "model").map(tokenUsage);
   const sum = (field: keyof TokenUsage): { total?: number; count: number } => {
     const known = values.map(value => value[field]).filter((n): n is number => n !== undefined);
