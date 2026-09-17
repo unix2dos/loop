@@ -90,3 +90,22 @@ export function runUsage(run) {
 export function formatDuration(seconds) {
     return seconds < 1 ? (seconds * 1000).toFixed(1) + " ms" : seconds.toFixed(2) + " s";
 }
+// Group for presentation without dropping or synthesizing any recorded event.
+export function executionSections(run) {
+    const sections = [];
+    let section;
+    for (const event of run.events) {
+        const end = event.kind === "control" && typeof event.output?.run_status === "string";
+        if (!section || event.kind === "model" || end) {
+            section = { kind: end ? "end" : event.kind === "model" ? "request" : "start", anchor: event, events: [] };
+            sections.push(section);
+        }
+        section.events.push(event);
+    }
+    return sections;
+}
+export function timelineLayout(run, mode, elapsed = run.duration ?? 0) {
+    const duration = (event) => event.status === "running" ? Math.max(0, elapsed - event.t) : event.d;
+    const extent = mode === "steps" ? Math.max(1, run.events.length) : Math.max(.001, elapsed, ...run.events.map(event => event.t + duration(event)));
+    return { extent, bars: run.events.map((event, index) => ({ event, left: mode === "steps" ? index / extent : event.t / extent, width: mode === "steps" ? .76 / extent : duration(event) / extent })) };
+}

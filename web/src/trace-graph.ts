@@ -98,3 +98,24 @@ export function runUsage(run: Run): { models: number; input: { total?: number; c
 export function formatDuration(seconds: number): string {
   return seconds < 1 ? (seconds * 1000).toFixed(1) + " ms" : seconds.toFixed(2) + " s";
 }
+
+export interface ExecutionSection { kind: "start" | "request" | "end"; anchor: TraceEvent; events: TraceEvent[] }
+// Group for presentation without dropping or synthesizing any recorded event.
+export function executionSections(run: Run): ExecutionSection[] {
+  const sections: ExecutionSection[] = [];
+  let section: ExecutionSection | undefined;
+  for (const event of run.events) {
+    const end = event.kind === "control" && typeof event.output?.run_status === "string";
+    if (!section || event.kind === "model" || end) {
+      section = { kind: end ? "end" : event.kind === "model" ? "request" : "start", anchor: event, events: [] };
+      sections.push(section);
+    }
+    section.events.push(event);
+  }
+  return sections;
+}
+export function timelineLayout(run: Run, mode: "steps" | "time", elapsed = run.duration ?? 0): { extent: number; bars: { event: TraceEvent; left: number; width: number }[] } {
+  const duration = (event: TraceEvent): number => event.status === "running" ? Math.max(0, elapsed - event.t) : event.d;
+  const extent = mode === "steps" ? Math.max(1, run.events.length) : Math.max(.001, elapsed, ...run.events.map(event => event.t + duration(event)));
+  return { extent, bars: run.events.map((event, index) => ({ event, left: mode === "steps" ? index / extent : event.t / extent, width: mode === "steps" ? .76 / extent : duration(event) / extent })) };
+}

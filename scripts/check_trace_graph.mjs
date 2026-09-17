@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildTraceGraph, relatedEvents, sameJSON, tokenUsage, runUsage, formatDuration } from '../web/dist/trace-graph.js';
+import { buildTraceGraph, relatedEvents, sameJSON, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from '../web/dist/trace-graph.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../testdata/loop-cases.json', import.meta.url), 'utf8'))[0];
 const clone = value => structuredClone(value);
@@ -94,4 +94,34 @@ check('未返回或非法 token 不当成零，部分统计保留覆盖数', () 
  const result=runUsage(run); assert.equal(result.total.total,0); assert.equal(result.total.count,1); assert.equal(result.models,2);
 });
 check('短工具耗时显示为毫秒',()=>{assert.equal(formatDuration(.0043),'4.3 ms');assert.equal(formatDuration(1.61),'1.61 s')});
+check('全程分组覆盖每一条真实事件，顺序不变',()=>{
+ const run=example();
+ run.events.unshift(event('input','input',0,{task:'test'},{}),event('prepare','control',0,{},{}));
+ run.events.push(event('end','control',2,{}, {run_status:'completed'}));
+ const groups=executionSections(run);
+ assert.deepEqual(groups.map(g=>g.kind),['start','request','request','end']);
+ assert.deepEqual(groups.flatMap(g=>g.events.map(e=>e.id)),run.events.map(e=>e.id));
+ assert.equal(new Set(groups.flatMap(g=>g.events.map(e=>e.id))).size,run.events.length);
+});
+check('预算结束保留准备、程序处理、工具、回执和终点',()=>{
+ const run=example();run.events.pop();run.status='budget_exhausted';
+ run.events.unshift(event('input','input',0,{},{}),event('prepare','control',0,{},{}));
+ run.events.splice(3,0,event('dispatch','control',1,{tool_call_id:'list-1'},{executor:'ExecuteReadonly'}));
+ run.events.push(event('end','control',1,{}, {run_status:'budget_exhausted'}));
+ const groups=executionSections(run);
+ assert.equal(groups.filter(g=>g.kind==='request').length,1);
+ assert.ok(groups.flatMap(g=>g.events).some(e=>e.id==='dispatch'));
+ assert.equal(groups.at(-1).anchor.output.run_status,'budget_exhausted');
+});
+check('步骤和耗时概览都覆盖完整事件，运行中不补未来步骤',()=>{
+ const run=example();run.events.forEach((e,i)=>{e.t=i*.2;e.d=.1});run.duration=1.2;
+ for(const mode of ['steps','time']){
+  const layout=timelineLayout(run,mode);
+  assert.deepEqual(layout.bars.map(b=>b.event.id),run.events.map(e=>e.id));
+  assert.ok(layout.bars.every(b=>b.left>=0&&b.width>=0&&b.left+b.width<=1.000001));
+ }
+ run.events=run.events.slice(0,1);run.events[0].status='running';run.status='running';
+ assert.equal(timelineLayout(run,'time',2).bars.length,1);
+ assert.equal(executionSections({events:[]}).length,0);
+});
 console.log(`${passed} trace and usage checks passed`);

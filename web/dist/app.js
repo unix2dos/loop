@@ -1,4 +1,4 @@
-import { buildTraceGraph, object, parseJSON, relatedEvents, tokenUsage, runUsage, formatDuration } from "./trace-graph.js";
+import { buildTraceGraph, object, relatedEvents, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from "./trace-graph.js";
 function $(id) {
     const element = document.getElementById(id);
     if (!element)
@@ -15,6 +15,8 @@ let activeId = null, selected = null;
 let graph = { steps: [], unlinkedTools: [] };
 let detailTab = "io", pointerPart = "", query = "", busy = false, detailOpen = false;
 let pollTimer;
+let timelineMode = "steps", traceFocused = false;
+const batchStates = new Map();
 let items = [], taskQuery = "", page = "home";
 function readPreference(key, fallback = false) { try {
     const value = localStorage.getItem(key);
@@ -36,6 +38,9 @@ function totalTokens(current) {
 function applyLayout() {
     $("app-shell").classList.toggle("sidebar-collapsed", sidebarCollapsed);
     $("workbench").classList.toggle("trace-collapsed", traceCollapsed);
+    $("workbench").classList.toggle("trace-focused", traceFocused && !traceCollapsed);
+    $("trace-focus").textContent = traceFocused ? "恢复对话" : "放大轨迹";
+    $("trace-focus").setAttribute("aria-pressed", String(traceFocused));
     $("sidebar-toggle").setAttribute("aria-expanded", String(!sidebarCollapsed));
     $("sidebar-toggle").setAttribute("aria-label", sidebarCollapsed ? "展开任务侧栏" : "收起任务侧栏");
     $("sidebar-toggle").textContent = sidebarCollapsed ? "☰" : "‹";
@@ -60,6 +65,8 @@ function resetRunView() {
     activeId = null;
     selected = null;
     pointerPart = "";
+    traceFocused = false;
+    batchStates.clear();
     query = "";
     detailOpen = false;
     graph = { steps: [], unlinkedTools: [] };
@@ -69,7 +76,7 @@ function resetRunView() {
     document.querySelector(".trace-pane")?.classList.remove("detail-open");
     setHTML("detail-heading", '<h2>选择一个步骤查看原始记录</h2>');
     setHTML("detail-content", "");
-    setHTML("event-list", "");
+    setHTML("timeline", "");
     $("event-count").textContent = "尚无记录";
     $("run-id").textContent = "";
     $("status").textContent = "等待任务";
@@ -184,15 +191,46 @@ function title(event) {
         return event.title === "read_file" ? "读取文件" : event.title === "list_files" ? "列出文件" : event.title;
     return event.title;
 }
-function node(event, related, small = false) {
-    const args = object(parseJSON(event.input.arguments));
-    const match = !query || (title(event) + " " + event.title + " " + summary(event) + " " + String(args.path ?? "") + " " + event.id).toLowerCase().includes(query);
-    const usage = tokenUsage(event);
-    const elapsed = event.status === "running" ? "进行中" : formatDuration(event.d);
-    return `<button id="node-${esc(event.id)}" class="node ${event.kind} ${event.status} ${small ? "compact" : ""} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""} ${query && match ? "search-match" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}">
- <span class="step-symbol" aria-hidden="true">${event.kind === "model" ? event.turn : event.kind === "tool" ? "↳" : "·"}</span>
- <span class="node-main"><strong>${esc(event.kind === "model" ? "模型请求 " + event.turn : title(event))}</strong>${event.kind === "tool" ? `<code title="${esc(args.path ?? event.title)}">${esc(args.path ?? event.title)}</code>` : `<small>${esc(summary(event))}</small>`}${event.kind === "tool" && event.status === "failed" ? `<small class="tool-error">${esc(event.output?.error ?? "执行失败")}</small>` : ""}</span>
- <span class="node-metrics"><b>${elapsed}</b>${event.kind === "model" ? `<small>${usage.total === undefined ? event.status === "running" ? "等待用量" : "Token 未返回" : number(usage.total) + " tokens"}</small>` : ""}</span></button>`;
+function rowRole(event) {
+    if (event.kind === "input")
+        return "USER";
+    if (event.kind === "model")
+        return object(event.output?.message).role === "assistant" ? "ASSISTANT" : "MODEL";
+    if (event.kind === "tool")
+        return "TOOL";
+    if (typeof event.input.system === "string")
+        return "CONTEXT";
+    if (typeof event.output?.tool_call_id === "string" && typeof event.output.content === "string")
+        return "RESULT";
+    if (typeof event.output?.run_status === "string")
+        return "STOP";
+    return "PROGRAM";
+}
+function rowText(event) {
+    if (event.status === "running")
+        return event.kind === "model" ? "模型请求中，等待响应" : event.title + " · 进行中";
+    if (event.kind === "input")
+        return typeof event.input.task === "string" ? event.input.task : event.title;
+    if (event.kind === "model") {
+        const content = object(event.output?.message).content;
+        return typeof content === "string" && content.trim() ? content : summary(event);
+    }
+    if (event.kind === "tool") {
+        const args = typeof event.input.arguments === "string" ? event.input.arguments : JSON.stringify(event.input.arguments);
+        const result = event.output?.error ?? (event.output?.content ? String(event.output.content) : event.output?.files ? JSON.stringify(event.output.files) : summary(event));
+        return event.title + " " + args + " → " + String(result);
+    }
+    if (typeof event.input.system === "string")
+        return "准备上下文 · 模型请求额度 " + String(event.input.max_requests ?? "—") + " · " + event.input.system;
+    if (rowRole(event) === "RESULT")
+        return "交回工具回执 · " + String(event.output?.content ?? "");
+    return event.title;
+}
+function matchesEvent(event) { return !query || (event.id + " " + event.title + " " + rowRole(event) + " " + rowText(event)).toLowerCase().includes(query); }
+function eventRow(event, related) {
+    const usage = tokenUsage(event), text = rowText(event);
+    const modelTokens = event.kind === "model" ? `<small>${usage.total === undefined ? event.status === "running" ? "等待用量" : "Token 未返回" : number(usage.total) + " tokens"}</small>` : "";
+    return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""} ${query && matchesEvent(event) ? "search-match" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}">${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark">请求 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
 }
 function callFor(id) {
     for (const step of graph.steps)
@@ -204,36 +242,39 @@ function callFor(id) {
 function pointer(event) { return "/events/" + run.events.findIndex(item => item.id === event.id); }
 function renderGraph(current) {
     const related = relatedEvents(graph, selected);
-    const input = current.events.find(event => event.kind === "input");
-    const terminal = [...current.events].reverse().find(event => event.kind === "control" && typeof event.output?.run_status === "string");
-    let html = input ? `<button class="origin-button" data-event="${esc(input.id)}">任务输入 <span>↓</span></button>` : "";
-    for (const step of graph.steps) {
-        html += `<section class="round" aria-label="第 ${step.model.turn} 次模型请求的调用关系">${node(step.model, related)}<div class="tool-group">`;
-        if (step.calls.length > 1)
-            html += `<div class="batch-label">同一响应提出 · 本批依次执行 ${step.calls.length} 个调用</div>`;
-        for (const call of step.calls) {
-            html += call.tool ? node(call.tool, related, true) : `<button class="node pending" data-event="${esc(step.model.id)}" data-part="/output/message/tool_calls/${call.callIndex}"><span class="step-symbol">↳</span><span class="node-main"><strong>${esc(call.name)}</strong><code>${esc(object(parseJSON(call.arguments)).path ?? "")}</code></span><span class="node-metrics">${current.status === "running" ? "待处理" : "未执行"}</span></button>`;
+    const elapsed = current.status === "running" ? Math.max(0, Date.now() / 1000 - current.created_at) : current.duration ?? 0;
+    const timeline = timelineLayout(current, timelineMode, elapsed);
+    const lanes = [["input", "输入"], ["model", "模型"], ["tool", "工具"], ["control", "程序"]];
+    setHTML("timeline", `<div class="timeline-axis"><span>${timelineMode === "steps" ? "事件顺序" : "实际耗时"}</span><div>${[0, .5, 1].map(n => `<span>${timelineMode === "steps" ? Math.max(1, Math.ceil(timeline.extent * n)) : (timeline.extent * n).toFixed(2) + "s"}</span>`).join("")}</div></div>${lanes.map(([kind, label]) => `<div class="timeline-lane"><span>${label}</span><div class="lane-track">${timeline.bars.filter(bar => bar.event.kind === kind).map(({ event, left, width }) => `<button class="timeline-bar kind-${kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" style="left:${left * 100}%;width:${width * 100}%" aria-label="${esc(event.id + " " + title(event))}" title="${esc(event.id + " · " + title(event) + " · " + (event.status === "running" ? "进行中" : formatDuration(event.d)))}"></button>`).join("")}</div></div>`).join("")}`);
+    document.querySelectorAll("[data-axis]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.axis === timelineMode)));
+    let html = graph.unlinkedTools.length ? `<p class="stream-note">${graph.unlinkedTools.length} 条工具记录的调用来源尚未核对，以下按原始顺序保留。</p>` : "";
+    const sections = executionSections(current);
+    for (const section of sections) {
+        const step = graph.steps.find(item => item.model.id === section.anchor.id);
+        const rest = section.kind === "request" ? section.events.slice(1) : [];
+        if (section.kind !== "request") {
+            html += `<section class="stream-section phase-${section.kind}" aria-label="${section.kind === "start" ? "任务与上下文" : "运行结束"}">${section.events.map(event => eventRow(event, related)).join("")}</section>`;
+            continue;
         }
-        const forwarded = step.calls.filter(call => call.nextModel);
-        if (forwarded.length) {
-            html += `<button class="feedback-link ${forwarded.some(call => call.tool?.status === "failed") ? "contains-error" : ""}" id="feedback-${esc(step.model.id)}" data-event="${esc(forwarded[0].nextModel.id)}" data-part="/input/messages">↳ ${forwarded.length} 条回执进入模型请求 ${forwarded[0].nextModel.turn} <span>↓</span></button>`;
+        html += `<section class="stream-section phase-request" aria-label="模型请求 ${section.anchor.turn}">${eventRow(section.anchor, related)}`;
+        if (rest.length) {
+            const open = batchStates.get(section.anchor.id) ?? current.events.length <= 12;
+            const names = rest.filter(event => event.kind === "tool").map(event => event.title);
+            const errors = rest.filter(event => event.kind === "tool" && event.status === "failed").length;
+            html += `<button id="batch-${esc(section.anchor.id)}" class="batch-summary ${errors ? "has-error" : ""}" data-batch="${esc(section.anchor.id)}" aria-expanded="${open}" aria-controls="batch-events-${esc(section.anchor.id)}"><span class="disclosure-arrow">${open ? "▾" : "▸"}</span><span>${names.length ? names.length + " 个工具调用 · " + [...new Set(names)].map(esc).join("、") : "程序处理记录"}</span><small>${rest.length} 条事件${errors ? ` · ${errors} 次错误` : ""}</small></button><div id="batch-events-${esc(section.anchor.id)}" class="batch-events" ${open ? "" : "hidden"}>${rest.map(event => eventRow(event, related)).join("")}</div>`;
+            const forwarded = step?.calls.filter(call => call.nextModel) ?? [];
+            if (forwarded.length)
+                html += `<button class="stream-receipt-link" data-event="${esc(forwarded[0].nextModel.id)}" data-part="/input/messages">↳ ${forwarded.length} 条回执已进入请求 ${forwarded[0].nextModel.turn} · 查看消息依据</button>`;
+            else if (step?.calls.some(call => call.receipt))
+                html += `<p class="stream-note">${current.status === "budget_exhausted" ? "回执已记录；模型额度耗尽，没有下一次请求。" : "回执已记录，尚未观察到携带它的后续请求。"}</p>`;
         }
-        else if (step.calls.length) {
-            const returned = step.calls.filter(call => call.receipt).length;
-            html += `<p class="no-feedback">${returned ? `已记录 ${returned} 条回执 · ` : ""}${current.status === "running" ? "尚无后续请求" : "未见已关联的后续请求"}</p>`;
-        }
-        html += "</div></section>";
+        html += "</section>";
     }
-    if (graph.unlinkedTools.length)
-        html += `<div class="unlinked"><p>以下记录无法唯一关联</p>${graph.unlinkedTools.map(event => node(event, related, true)).join("")}</div>`;
-    if (terminal)
-        html += `<button class="terminal-line ${current.status}" data-event="${esc(terminal.id)}">${esc(statuses[current.status])}<span>${current.status === "completed" ? "结果待核对" : "查看停止原因"} ↗</span></button>`;
-    if (!graph.steps.length && !terminal)
-        html += '<div class="empty-graph"><p>等待第一个模型请求…</p></div>';
+    if (!current.events.length)
+        html = `<div class="empty-graph"><p>${current.status === "running" ? "等待第一个执行事件…" : "本次没有可用的执行事件，请查看运行状态。"}</p></div>`;
     setHTML("graph", html);
-    const filtered = current.events.filter(event => (event.id + " " + event.title + " " + title(event) + " " + summary(event) + " " + String(event.input.arguments ?? "")).toLowerCase().includes(query));
-    $("event-count").textContent = query ? `${filtered.length} / ${current.events.length} 条匹配` : `${current.events.length} 条`;
-    setHTML("event-list", filtered.map(event => `<button class="record-row ${selected === event.id ? "active" : ""}" data-event="${esc(event.id)}"><code>${esc(event.id)}</code><span>${roles[event.kind]}</span><strong>${esc(title(event))}</strong><small>${esc(summary(event))}</small></button>`).join("") || '<p class="muted">没有匹配事件。</p>');
+    const matched = current.events.filter(matchesEvent).length;
+    $("event-count").textContent = query ? `${matched} / ${current.events.length} 条匹配` : `完整事件流 · ${current.events.length} 条`;
 }
 function explanation(event) {
     if (event.kind === "model") {
@@ -382,6 +423,7 @@ async function poll() {
 }
 async function chooseRun(id, changeURL = true) {
     page = "run";
+    batchStates.clear();
     activeId = id;
     run = null;
     selected = null;
@@ -398,7 +440,7 @@ async function chooseRun(id, changeURL = true) {
     setHTML("conversation", '<p class="muted loading-note">正在载入任务和回答…</p>');
     setHTML("detail-heading", "");
     setHTML("detail-content", "");
-    setHTML("event-list", "");
+    setHTML("timeline", "");
     if (changeURL)
         updateURL(id);
     await poll();
@@ -409,6 +451,9 @@ function selectEvent(id, part = "", detail) {
     selected = id;
     pointerPart = part;
     detailOpen = true;
+    const section = executionSections(run).find(section => section.events.some(event => event.id === id));
+    if (section?.kind === "request")
+        batchStates.set(section.anchor.id, true);
     $("follow").checked = false;
     detailTab = detail === "overview" || detail === "code" ? detail : "io";
     if (traceCollapsed) {
@@ -424,6 +469,16 @@ function selectEvent(id, part = "", detail) {
 document.addEventListener("click", event => {
     if (!(event.target instanceof Element))
         return;
+    const axis = event.target.closest("[data-axis]")?.dataset.axis;
+    if (axis === "steps" || axis === "time") {
+        timelineMode = axis;
+        render();
+    }
+    const batch = event.target.closest("[data-batch]")?.dataset.batch;
+    if (batch && run) {
+        batchStates.set(batch, !(batchStates.get(batch) ?? run.events.length <= 12));
+        render();
+    }
     const taskLink = event.target.closest("[data-run]");
     if (taskLink?.dataset.run) {
         void chooseRun(taskLink.dataset.run);
@@ -474,7 +529,15 @@ $("detail-heading").addEventListener("keydown", event => {
     render();
     document.getElementById("detail-tab-" + detailTab)?.focus();
 });
-$("search").addEventListener("input", () => { query = $("search").value.trim().toLowerCase(); render(); });
+$("search").addEventListener("input", () => {
+    query = $("search").value.trim().toLowerCase();
+    if (query && run)
+        for (const section of executionSections(run))
+            if (section.events.some(matchesEvent))
+                batchStates.set(section.anchor.id, true);
+    render();
+});
+$("trace-focus").onclick = () => { traceFocused = !traceFocused; traceCollapsed = false; applyLayout(); };
 $("follow").onchange = () => render();
 $("task-search").addEventListener("input", () => { taskQuery = $("task-search").value.trim().toLowerCase(); renderTaskLists(); });
 $("sidebar-toggle").onclick = () => { sidebarCollapsed = !sidebarCollapsed; savePreference("loop.sidebarCollapsed", sidebarCollapsed); applyLayout(); };
