@@ -192,7 +192,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if r.Method != http.MethodPost || r.URL.Path != "/api/runs" {
+	recordID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/runs/"), "/open-record")
+	openRecord := r.URL.Path == "/api/runs/"+recordID+"/open-record" && runIDPattern.MatchString(recordID)
+	if r.Method != http.MethodPost || (r.URL.Path != "/api/runs" && !openRecord) {
 		respond(w, 404, map[string]any{"error": "not_found"})
 		return
 	}
@@ -202,6 +204,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]) != "application/json" {
 		respond(w, 415, map[string]any{"error": "需要 JSON 请求"})
+		return
+	}
+	if openRecord {
+		s.openRecord(w, r, recordID)
 		return
 	}
 	var payload struct {

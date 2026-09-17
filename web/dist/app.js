@@ -13,11 +13,11 @@ const statuses = { running: "运行中", completed: "循环已结束", budget_ex
 let config = null, run = null;
 let activeId = null, selected = null;
 let graph = { steps: [], unlinkedTools: [] };
-let detailTab = "io", pointerPart = "", query = "", busy = false, detailOpen = false;
+let detailTab = "io", pointerPart = "", busy = false, detailOpen = false;
 let pollTimer;
-let timelineMode = "steps", traceFocused = false;
+let traceFocused = false, openingRecord = false, recordFeedback = "";
 const batchStates = new Map();
-let items = [], taskQuery = "", page = "home";
+let items = [], page = "home";
 function readPreference(key, fallback = false) { try {
     const value = localStorage.getItem(key);
     return value === null ? fallback : value === "true";
@@ -67,10 +67,9 @@ function resetRunView() {
     pointerPart = "";
     traceFocused = false;
     batchStates.clear();
-    query = "";
+    recordFeedback = "";
     detailOpen = false;
     graph = { steps: [], unlinkedTools: [] };
-    $("search").value = "";
     $("download").disabled = true;
     window.clearTimeout(pollTimer);
     document.querySelector(".trace-pane")?.classList.remove("detail-open");
@@ -89,11 +88,10 @@ function resetRunView() {
     }
 }
 function renderTaskLists() {
-    const shown = items.filter(item => (item.task + " " + item.model + " " + item.id).toLowerCase().includes(taskQuery));
     const date = (item) => new Date(item.created_at * 1000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-    setHTML("task-list", shown.map(item => `<button id="task-${esc(item.id)}" class="task-item ${activeId === item.id ? "active" : ""}" data-run="${esc(item.id)}" aria-current="${activeId === item.id}" title="${esc(item.task)}"><strong>${esc(item.task.slice(0, 100))}</strong><span><i class="task-dot ${esc(item.status)}"></i>${esc(statuses[item.status])}<time>${date(item)}</time></span></button>`).join("") || '<p class="list-empty">没有匹配的任务</p>');
-    setHTML("home-task-list", shown.map(item => `<button id="home-task-${esc(item.id)}" class="home-task" data-run="${esc(item.id)}"><span><strong>${esc(item.task.slice(0, 140))}</strong><small>${esc(item.model)} · ${esc(item.id.slice(0, 8))}</small></span><span class="task-state ${esc(item.status)}">${esc(statuses[item.status])}</span><time>${date(item)}</time><span aria-hidden="true">↗</span></button>`).join("") || '<div class="home-empty"><h2>从一个小任务开始</h2><p>提交一个只读任务，模型请求和工具回执会一起保存在本地。</p><button class="primary" data-new-task>创建第一个任务 →</button></div>');
-    $("task-count").textContent = `${shown.length} / ${items.length} 个任务`;
+    setHTML("task-list", items.map(item => `<button id="task-${esc(item.id)}" class="task-item ${activeId === item.id ? "active" : ""}" data-run="${esc(item.id)}" aria-current="${activeId === item.id}" title="${esc(item.task)}"><strong>${esc(item.task.slice(0, 100))}</strong><span><i class="task-dot ${esc(item.status)}"></i>${esc(statuses[item.status])}<time>${date(item)}</time></span></button>`).join("") || '<p class="list-empty">尚无任务记录</p>');
+    setHTML("home-task-list", items.map(item => `<button id="home-task-${esc(item.id)}" class="home-task" data-run="${esc(item.id)}"><span><strong>${esc(item.task.slice(0, 140))}</strong><small>${esc(item.model)} · ${esc(item.id.slice(0, 8))}</small></span><span class="task-state ${esc(item.status)}">${esc(statuses[item.status])}</span><time>${date(item)}</time><span aria-hidden="true">↗</span></button>`).join("") || '<div class="home-empty"><h2>从一个小任务开始</h2><p>提交一个只读任务，模型请求和工具回执会一起保存在本地。</p><button class="primary" data-new-task>创建第一个任务 →</button></div>');
+    $("task-count").textContent = `${items.length} 个任务`;
     $("home-count").textContent = `${items.length} 个已记录任务`;
 }
 async function showHome(changeURL = true) {
@@ -226,11 +224,10 @@ function rowText(event) {
         return "交回工具回执 · " + String(event.output?.content ?? "");
     return event.title;
 }
-function matchesEvent(event) { return !query || (event.id + " " + event.title + " " + rowRole(event) + " " + rowText(event)).toLowerCase().includes(query); }
 function eventRow(event, related) {
     const usage = tokenUsage(event), text = rowText(event);
     const modelTokens = event.kind === "model" ? `<small>${usage.total === undefined ? event.status === "running" ? "等待用量" : "Token 未返回" : number(usage.total) + " tokens"}</small>` : "";
-    return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""} ${query && matchesEvent(event) ? "search-match" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}">${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark">请求 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
+    return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}">${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark">请求 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
 }
 function callFor(id) {
     for (const step of graph.steps)
@@ -243,10 +240,10 @@ function pointer(event) { return "/events/" + run.events.findIndex(item => item.
 function renderGraph(current) {
     const related = relatedEvents(graph, selected);
     const elapsed = current.status === "running" ? Math.max(0, Date.now() / 1000 - current.created_at) : current.duration ?? 0;
-    const timeline = timelineLayout(current, timelineMode, elapsed);
+    const timeline = timelineLayout(current, "time", elapsed), steps = timelineLayout(current, "steps");
     const lanes = [["input", "输入"], ["model", "模型"], ["tool", "工具"], ["control", "程序"]];
-    setHTML("timeline", `<div class="timeline-axis"><span>${timelineMode === "steps" ? "事件顺序" : "实际耗时"}</span><div>${[0, .5, 1].map(n => `<span>${timelineMode === "steps" ? Math.max(1, Math.ceil(timeline.extent * n)) : (timeline.extent * n).toFixed(2) + "s"}</span>`).join("")}</div></div>${lanes.map(([kind, label]) => `<div class="timeline-lane"><span>${label}</span><div class="lane-track">${timeline.bars.filter(bar => bar.event.kind === kind).map(({ event, left, width }) => `<button class="timeline-bar kind-${kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" style="left:${left * 100}%;width:${width * 100}%" aria-label="${esc(event.id + " " + title(event))}" title="${esc(event.id + " · " + title(event) + " · " + (event.status === "running" ? "进行中" : formatDuration(event.d)))}"></button>`).join("")}</div></div>`).join("")}`);
-    document.querySelectorAll("[data-axis]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.axis === timelineMode)));
+    const marker = (event, left, width, step = false) => `<button class="timeline-bar kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" style="left:${left * 100}%;width:${width * 100}%" aria-pressed="${selected === event.id}" aria-label="${step ? "步骤" : "耗时"} ${esc(event.id + " " + title(event))}" title="${esc(event.id + " · " + title(event) + " · " + (event.status === "running" ? "进行中" : formatDuration(event.d)))}">${step ? esc(event.id.replace(/^e0*/, "")) : ""}</button>`;
+    setHTML("timeline", `<div class="timeline-lane step-lane"><span>步骤</span><div class="step-track">${steps.bars.map(({ event, left, width }) => marker(event, left, width, true)).join("")}</div></div><div class="timeline-axis"><span>耗时</span><div>${[0, .5, 1].map(n => `<span>${(timeline.extent * n).toFixed(2)}s</span>`).join("")}</div></div>${lanes.map(([kind, label]) => `<div class="timeline-lane"><span>${label}</span><div class="lane-track">${timeline.bars.filter(bar => bar.event.kind === kind).map(({ event, left, width }) => marker(event, left, width)).join("")}</div></div>`).join("")}`);
     let html = graph.unlinkedTools.length ? `<p class="stream-note">${graph.unlinkedTools.length} 条工具记录的调用来源尚未核对，以下按原始顺序保留。</p>` : "";
     const sections = executionSections(current);
     for (const section of sections) {
@@ -273,8 +270,7 @@ function renderGraph(current) {
     if (!current.events.length)
         html = `<div class="empty-graph"><p>${current.status === "running" ? "等待第一个执行事件…" : "本次没有可用的执行事件，请查看运行状态。"}</p></div>`;
     setHTML("graph", html);
-    const matched = current.events.filter(matchesEvent).length;
-    $("event-count").textContent = query ? `${matched} / ${current.events.length} 条匹配` : `完整事件流 · ${current.events.length} 条`;
+    $("event-count").textContent = `完整事件流 · ${current.events.length} 条`;
 }
 function explanation(event) {
     if (event.kind === "model") {
@@ -328,18 +324,15 @@ function renderDetail(current) {
             content += `<div class="error-evidence"><code>${esc(event.output.error)}</code><p>${esc(event.output.message ?? "工具没有执行成功。")}</p></div>`;
     }
     else if (detailTab === "io") {
-        const location = (config?.state_dir ?? ".agent_state/runs") + "/" + current.id;
-        const point = pointer(event) + pointerPart;
-        content = `<div class="evidence-location"><div><span class="eyebrow">${current.status === "running" ? "当前实时快照 · 结束后保存至" : "本地原始记录"}</span><code>${esc(location)}/run.json</code><code class="json-pointer">${esc(point)}</code></div><button id="copy-evidence" data-copy="${esc(location + "/run.json#" + point)}">复制定位</button></div>`;
-        if (current.status === "running")
-            content += '<p class="detail-note">run.json 尚未完成落盘。下面来自当前运行快照；已发生的事件同时追加在 trace.jsonl 中。</p>';
+        const filename = current.status === "running" ? "trace.jsonl" : "run.json";
+        content = `<div class="record-link"><button id="open-record" class="text-link" data-open-record ${openingRecord ? "disabled" : ""} title="在本机编辑器中打开记录，定位到所选事件或字段的实际行">${openingRecord ? "正在打开…" : "打开本地记录 ↗"}</button><code>${filename} · ${esc(event.id)}</code><span id="record-feedback" role="status">${esc(recordFeedback)}</span></div>`;
         if (pointerPart) {
             let value = event;
             for (const segment of pointerPart.split("/").slice(1))
                 value = Array.isArray(value) ? value[Number(segment)] : object(value)[segment];
             content += `<div class="evidence-fragment"><h3>已定位的消息 / 字段</h3><pre>${pretty(value ?? null)}</pre></div>`;
         }
-        content += `<div class="json-pair"><section><h3>实际输入 <code>${esc(pointer(event))}/input</code></h3><pre>${pretty(event.input)}</pre></section><section><h3>实际输出 <code>${esc(pointer(event))}/output</code></h3><pre>${event.status === "running" ? "尚未返回" : pretty(event.output)}</pre></section></div><p class="detail-note">过程文件：<code>${esc(location)}/trace.jsonl</code>，按事件 ID <code>${esc(event.id)}</code> 查找；消息顺序保存在同目录的 <code>session.jsonl</code>。回看和复制定位不会重新执行任务。</p>`;
+        content += `<div class="json-pair"><section><h3>实际输入 <code>${esc(pointer(event))}/input</code></h3><pre>${pretty(event.input)}</pre></section><section><h3>实际输出 <code>${esc(pointer(event))}/output</code></h3><pre>${event.status === "running" ? "尚未返回" : pretty(event.output)}</pre></section></div><p class="detail-note">${current.status === "running" ? "运行中打开 trace.jsonl 的对应事件行；结束后打开 run.json。" : "打开后定位到所选事件或字段的实际行。"}查看记录不会重新运行任务。</p>`;
     }
     else
         content = source ? `<div class="source-heading"><code>${esc(source.path)}:${source.line}</code><span>本次运行保存的函数源码</span></div><pre class="source-code">${esc(source.code)}</pre><p class="detail-note">关联到函数整体，未声称精确到执行语句。历史源码不会被当前文件覆盖。</p>` : '<p class="detail-note">这条历史记录没有对应的源码快照。</p>';
@@ -361,8 +354,15 @@ function render() {
         selected = current.events.at(-1)?.id ?? null;
     if (!current.events.some(event => event.id === selected))
         selected = graph.steps[0]?.model.id ?? current.events[0]?.id ?? null;
-    if (selected !== previous)
+    if (selected !== previous) {
         pointerPart = "";
+        recordFeedback = "";
+        if ($("follow").checked && selected) {
+            const section = executionSections(current).find(section => section.events.some(event => event.id === selected));
+            if (section?.kind === "request")
+                batchStates.set(section.anchor.id, true);
+        }
+    }
     $("model-label").textContent = current.model;
     $("workspace-label").textContent = (current.workspace === config.workspace ? "只读工作区 · " : "历史工作区 · ") + current.workspace;
     $("workspace-label").title = current.workspace;
@@ -428,9 +428,8 @@ async function chooseRun(id, changeURL = true) {
     run = null;
     selected = null;
     pointerPart = "";
-    query = "";
+    recordFeedback = "";
     detailOpen = false;
-    $("search").value = "";
     window.clearTimeout(pollTimer);
     showError("");
     applyLayout();
@@ -450,6 +449,7 @@ function selectEvent(id, part = "", detail) {
         return;
     selected = id;
     pointerPart = part;
+    recordFeedback = "";
     detailOpen = true;
     const section = executionSections(run).find(section => section.events.some(event => event.id === id));
     if (section?.kind === "request")
@@ -466,14 +466,33 @@ function selectEvent(id, part = "", detail) {
     target?.scrollIntoView({ block: "nearest", inline: "nearest" });
     target?.focus({ preventScroll: true });
 }
+async function openRecord() {
+    if (!run || !selected || !config || openingRecord)
+        return;
+    const runID = run.id, eventID = selected, field = pointerPart;
+    openingRecord = true;
+    recordFeedback = "";
+    renderDetail(run);
+    try {
+        const result = await api(`/api/runs/${encodeURIComponent(runID)}/open-record`, {
+            method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Token": config.token }, body: JSON.stringify({ event_id: eventID, field })
+        });
+        if (run?.id === runID && selected === eventID && pointerPart === field)
+            recordFeedback = `${result.editor} · ${result.path.split(/[\\/]/).at(-1)}:${result.line}`;
+    }
+    catch (error) {
+        if (run?.id === runID && selected === eventID && pointerPart === field)
+            recordFeedback = message(error);
+    }
+    finally {
+        openingRecord = false;
+        if (run)
+            renderDetail(run);
+    }
+}
 document.addEventListener("click", event => {
     if (!(event.target instanceof Element))
         return;
-    const axis = event.target.closest("[data-axis]")?.dataset.axis;
-    if (axis === "steps" || axis === "time") {
-        timelineMode = axis;
-        render();
-    }
     const batch = event.target.closest("[data-batch]")?.dataset.batch;
     if (batch && run) {
         batchStates.set(batch, !(batchStates.get(batch) ?? run.events.length <= 12));
@@ -510,9 +529,8 @@ document.addEventListener("click", event => {
         detailTab = tab;
         render();
     }
-    const copy = event.target.closest("[data-copy]");
-    if (copy?.dataset.copy)
-        void navigator.clipboard.writeText(copy.dataset.copy).then(() => { copy.textContent = "已复制"; }).catch(() => { copy.textContent = "请手动选择路径"; });
+    if (event.target.closest("[data-open-record]"))
+        void openRecord();
     const example = event.target.closest("[data-example]")?.dataset.example;
     if (example) {
         $("task").value = example;
@@ -529,17 +547,8 @@ $("detail-heading").addEventListener("keydown", event => {
     render();
     document.getElementById("detail-tab-" + detailTab)?.focus();
 });
-$("search").addEventListener("input", () => {
-    query = $("search").value.trim().toLowerCase();
-    if (query && run)
-        for (const section of executionSections(run))
-            if (section.events.some(matchesEvent))
-                batchStates.set(section.anchor.id, true);
-    render();
-});
 $("trace-focus").onclick = () => { traceFocused = !traceFocused; traceCollapsed = false; applyLayout(); };
 $("follow").onchange = () => render();
-$("task-search").addEventListener("input", () => { taskQuery = $("task-search").value.trim().toLowerCase(); renderTaskLists(); });
 $("sidebar-toggle").onclick = () => { sidebarCollapsed = !sidebarCollapsed; savePreference("loop.sidebarCollapsed", sidebarCollapsed); applyLayout(); };
 $("refresh-tasks").onclick = () => { void refreshHistory().catch(error => { $("home-note").textContent = message(error); }); };
 window.addEventListener("popstate", () => { void routeFromLocation(); });

@@ -255,8 +255,19 @@ func sortedRunIDs(runs map[string]*Run) []string {
 }
 
 func readStoredRun(directory, id string) (*Run, error) {
+	raw, err := readRunFile(directory, id, "run.json")
+	if err != nil {
+		return nil, err
+	}
+	return decodeHistory(raw, id)
+}
+
+func readRunFile(directory, id, name string) ([]byte, error) {
 	if !runIDPattern.MatchString(id) {
 		return nil, errors.New("invalid run id")
+	}
+	if name != "run.json" && name != "trace.jsonl" {
+		return nil, errors.New("invalid record file")
 	}
 	folder := filepath.Join(directory, id)
 	info, err := os.Lstat(folder)
@@ -266,7 +277,7 @@ func readStoredRun(directory, id string) (*Run, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("ordinary run directory required")
 	}
-	path := filepath.Join(folder, "run.json")
+	path := filepath.Join(folder, name)
 	info, err = os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -274,11 +285,7 @@ func readStoredRun(directory, id string) (*Run, error) {
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("ordinary run file required")
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return decodeHistory(raw, id)
+	return os.ReadFile(path)
 }
 
 func loadHistory(directory string) (map[string]RunSummary, int, error) {
