@@ -88,7 +88,7 @@ func (s *Server) newRun(task string, budget int, model string) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Run{ID: id, Task: task, Model: model, Workspace: s.workspace, MaxRequests: budget, Status: "running",
+	return &Run{ConversationTurn: 1, ID: id, Task: task, Model: model, Workspace: s.workspace, MaxRequests: budget, Status: "running",
 		TaskResult: "not_evaluated", Events: []*Event{}, CreatedAt: float64(time.Now().UnixNano()) / 1e9,
 		Source: s.sources, Engine: "go", BuildID: s.buildID}, nil
 }
@@ -147,7 +147,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeResponse(w, 200, raw, "text/html; charset=utf-8")
 		case "/favicon.ico":
 			writeResponse(w, 204, nil, "image/x-icon")
-		case "/app.js", "/trace-graph.js":
+		case "/app.js", "/trace-graph.js", "/conversation.js":
 			raw, err := assets.ReadFile("web/dist/" + strings.TrimPrefix(r.URL.Path, "/"))
 			if err != nil {
 				respond(w, 500, map[string]any{"error": "界面脚本不可用"})
@@ -211,6 +211,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload struct {
+		ParentRunID string          `json:"parent_run_id"`
 		Task        string          `json:"task"`
 		MaxRequests json.RawMessage `json:"max_requests"`
 	}
@@ -243,7 +244,43 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 409, map[string]any{"error": "已有任务运行中，请等它结束"})
 		return
 	}
-	call, model, err := s.factory(run.ID)
+	var prior []Message
+	if payload.ParentRunID != "" {
+		// One linear conversation: reject an old head instead of silently forking it.
+		for _, item := range s.history {
+			if item.ParentRunID == payload.ParentRunID {
+				s.mu.Unlock()
+				respond(w, 409, map[string]any{"error": "这段对话已有后续消息，请刷新后继续"})
+				return
+			}
+		}
+		parent, readErr := readStoredRun(s.state, payload.ParentRunID)
+		if readErr != nil {
+			s.mu.Unlock()
+			respond(w, 400, map[string]any{"error": "上一轮记录尚未保存或不可用，无法继续对话"})
+			return
+		}
+		if parent.Workspace != s.workspace {
+			s.mu.Unlock()
+			respond(w, 400, map[string]any{"error": "当前工作区与这段历史不同，请切回原工作区或开始新任务"})
+			return
+		}
+		prior, err = conversationMessages(s.state, parent)
+		if err != nil {
+			s.mu.Unlock()
+			respond(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
+		run.ParentRunID, run.ConversationID, run.ConversationTurn = parent.ID, parent.ConversationID, max(1, parent.ConversationTurn)+1
+		if run.ConversationID == "" {
+			run.ConversationID = parent.ID
+		}
+	}
+	sessionID := run.ConversationID
+	if sessionID == "" {
+		sessionID = run.ID
+	}
+	call, model, err := s.factory(sessionID)
 	if err != nil {
 		s.mu.Unlock()
 		respond(w, 503, map[string]any{"error": "模型配置不可用，请设置 OPENAI_API_KEY、OPENAI_MODEL，以及可选 OPENAI_BASE_URL"})
@@ -264,7 +301,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	go func() {
 		// A Run belongs to the server, not the browser connection that submitted it.
-		err := RunTask(context.Background(), run, call, s.tools, filepath.Join(s.state, run.ID), &s.mu)
+		err := RunTask(context.Background(), run, call, s.tools, filepath.Join(s.state, run.ID), &s.mu, prior)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if err != nil {

@@ -39,36 +39,42 @@ type Event struct {
 	Explanation string         `json:"explanation"`
 }
 type Run struct {
-	ID            string            `json:"id"`
-	Task          string            `json:"task"`
-	Model         string            `json:"model"`
-	Workspace     string            `json:"workspace"`
-	MaxRequests   int               `json:"max_requests"`
-	Status        string            `json:"status"`
-	TaskResult    string            `json:"task_result"`
-	Answer        string            `json:"answer"`
-	Error         map[string]any    `json:"error"`
-	Events        []*Event          `json:"events"`
-	CreatedAt     float64           `json:"created_at"`
-	Duration      float64           `json:"duration"`
-	ModelRequests int               `json:"model_requests"`
-	ToolCalls     int               `json:"tool_calls"`
-	ToolErrors    int               `json:"tool_errors"`
-	Source        map[string]Source `json:"source"`
-	Engine        string            `json:"engine,omitempty"`
-	BuildID       string            `json:"build_id,omitempty"`
+	ParentRunID      string            `json:"parent_run_id,omitempty"`
+	ConversationID   string            `json:"conversation_id,omitempty"`
+	ConversationTurn int               `json:"conversation_turn,omitempty"`
+	ID               string            `json:"id"`
+	Task             string            `json:"task"`
+	Model            string            `json:"model"`
+	Workspace        string            `json:"workspace"`
+	MaxRequests      int               `json:"max_requests"`
+	Status           string            `json:"status"`
+	TaskResult       string            `json:"task_result"`
+	Answer           string            `json:"answer"`
+	Error            map[string]any    `json:"error"`
+	Events           []*Event          `json:"events"`
+	CreatedAt        float64           `json:"created_at"`
+	Duration         float64           `json:"duration"`
+	ModelRequests    int               `json:"model_requests"`
+	ToolCalls        int               `json:"tool_calls"`
+	ToolErrors       int               `json:"tool_errors"`
+	Source           map[string]Source `json:"source"`
+	Engine           string            `json:"engine,omitempty"`
+	BuildID          string            `json:"build_id,omitempty"`
 }
 
 type RunSummary struct {
-	ID        string  `json:"id"`
-	Task      string  `json:"task"`
-	Model     string  `json:"model"`
-	Status    string  `json:"status"`
-	CreatedAt float64 `json:"created_at"`
+	ParentRunID      string  `json:"parent_run_id,omitempty"`
+	ConversationID   string  `json:"conversation_id,omitempty"`
+	ConversationTurn int     `json:"conversation_turn,omitempty"`
+	ID               string  `json:"id"`
+	Task             string  `json:"task"`
+	Model            string  `json:"model"`
+	Status           string  `json:"status"`
+	CreatedAt        float64 `json:"created_at"`
 }
 
 func summarizeRun(run *Run) RunSummary {
-	return RunSummary{ID: run.ID, Task: run.Task, Model: run.Model, Status: run.Status, CreatedAt: run.CreatedAt}
+	return RunSummary{ParentRunID: run.ParentRunID, ConversationID: run.ConversationID, ConversationTurn: run.ConversationTurn, ID: run.ID, Task: run.Task, Model: run.Model, Status: run.Status, CreatedAt: run.CreatedAt}
 }
 
 func sortedSummaries(history map[string]RunSummary) []RunSummary {
@@ -204,6 +210,12 @@ func decodeHistory(raw []byte, id string) (*Run, error) {
 	if run.Status != "completed" && run.Status != "failed" && run.Status != "budget_exhausted" {
 		return nil, errors.New("run not finished")
 	}
+	if run.ParentRunID != "" && (!runIDPattern.MatchString(run.ParentRunID) || run.ParentRunID == run.ID || !runIDPattern.MatchString(run.ConversationID) || run.ConversationID == run.ID || run.ConversationTurn < 2) {
+		return nil, errors.New("invalid conversation link")
+	}
+	if run.ParentRunID == "" && (run.ConversationID != "" || run.ConversationTurn > 1 || run.ConversationTurn < 0) {
+		return nil, errors.New("invalid conversation root")
+	}
 	if run.CreatedAt < 0 || run.Duration < 0 || run.ModelRequests < 0 || run.ToolCalls < 0 || run.ToolErrors < 0 || len(run.Events) == 0 {
 		return nil, errors.New("invalid history counters")
 	}
@@ -266,7 +278,7 @@ func readRunFile(directory, id, name string) ([]byte, error) {
 	if !runIDPattern.MatchString(id) {
 		return nil, errors.New("invalid run id")
 	}
-	if name != "run.json" && name != "trace.jsonl" {
+	if name != "run.json" && name != "trace.jsonl" && name != "session.jsonl" {
 		return nil, errors.New("invalid record file")
 	}
 	folder := filepath.Join(directory, id)
@@ -284,6 +296,9 @@ func readRunFile(directory, id, name string) ([]byte, error) {
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("ordinary run file required")
+	}
+	if name == "session.jsonl" && info.Size() > 16<<20 {
+		return nil, errors.New("对话记录已超过 16 MiB，请开始新任务")
 	}
 	return os.ReadFile(path)
 }

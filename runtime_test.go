@@ -79,7 +79,7 @@ func TestBehaviorContracts(t *testing.T) {
 			}
 			var requests []ModelRequest
 			var mu sync.Mutex
-			if err = RunTask(context.Background(), run, scripted(example.Responses, &requests), server.tools, filepath.Join(state, run.ID), &mu); err != nil {
+			if err = RunTask(context.Background(), run, scripted(example.Responses, &requests), server.tools, filepath.Join(state, run.ID), &mu, nil); err != nil {
 				t.Fatal(err)
 			}
 			if run.Status != example.Status || run.ModelRequests != example.Requests || run.ToolCalls != example.Tools || run.ToolErrors != example.ToolErrors || run.Answer != example.Answer || run.TaskResult != "not_evaluated" {
@@ -162,7 +162,7 @@ func TestHistoryAndHTTP(t *testing.T) {
 	}
 	run, _ := server.newRun("读取 note.md", 4, "scripted")
 	var requests []ModelRequest
-	if err = RunTask(context.Background(), run, scripted(example.Responses, &requests), server.tools, filepath.Join(state, run.ID), &server.mu); err != nil {
+	if err = RunTask(context.Background(), run, scripted(example.Responses, &requests), server.tools, filepath.Join(state, run.ID), &server.mu, nil); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(state, run.ID, "run.json")
@@ -371,7 +371,7 @@ func TestAllHistoryAndLazyDetail(t *testing.T) {
 	example := cases(t)[0]
 	run, _ := app.newRun("history example", 4, "scripted")
 	var requests []ModelRequest
-	if err := RunTask(context.Background(), run, scripted(example.Responses, &requests), app.tools, filepath.Join(state, run.ID), &app.mu); err != nil {
+	if err := RunTask(context.Background(), run, scripted(example.Responses, &requests), app.tools, filepath.Join(state, run.ID), &app.mu, nil); err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 11; i++ {

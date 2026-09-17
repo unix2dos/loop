@@ -1,3 +1,4 @@
+import {conversationHeads, conversationID} from "../web/dist/conversation.js";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildTraceGraph, relatedEvents, sameJSON, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from '../web/dist/trace-graph.js';
@@ -22,6 +23,12 @@ function example() {
 }
 let passed = 0;
 function check(name, run) { run(); passed++; console.log('PASS ' + name); }
+check('对话侧栏合并连续轮次，旧运行保持独立', () => {
+ const root={id:'root',created_at:1}, next={id:'next',conversation_id:'root',parent_run_id:'root',conversation_turn:2,created_at:2}, old={id:'legacy',created_at:0};
+ assert.deepEqual(conversationHeads([next,root,old]).map(x=>x.id),['next','legacy']);
+ assert.equal(conversationID(old),'legacy');
+ assert.deepEqual(conversationHeads([root,next]).map(x=>x.id),['next']);
+});
 check('同一响应的两个调用分别配对，错误回执也进入下一次请求', () => {
   const graph = buildTraceGraph(example());
   assert.equal(graph.steps.length, 2);

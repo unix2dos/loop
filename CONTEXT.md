@@ -9,7 +9,7 @@ An environment for learning Agent behavior by running tasks, following the relat
 _Avoid_: Trace display alone, code-writing quota, generic framework showcase
 
 **Run**:
-One submitted task and its bounded execution, including model requests, tool calls, and its stopping outcome.
+One user message and its bounded execution, including model requests, tool calls, and its stopping outcome. A follow-up creates a new run linked to the previous conversation turn while preserving the previous run.
 _Avoid_: A guaranteed successful task, an entire user's history
 
 **Harness**:
@@ -33,7 +33,7 @@ An observable connection between a request, an action, its returned result, and 
 _Avoid_: Time adjacency alone, an invented explanation of the model's internal reasoning
 
 **Task Conversation**:
-A sequence of user requests and Agent responses directed toward carrying out a task.
+A sequence of user requests and Agent responses directed toward carrying out a task. Follow-ups carry the recorded messages, including tool calls and receipts; starting a new task creates a separate conversation.
 _Avoid_: A learning question about an already recorded action
 
 **Learning Question**:

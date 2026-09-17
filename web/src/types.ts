@@ -22,6 +22,9 @@ export interface TraceEvent {
   explanation: string;
 }
 export interface RunSummary {
+  parent_run_id?: string;
+  conversation_id?: string;
+  conversation_turn?: number;
   id: string;
   task: string;
   model: string;

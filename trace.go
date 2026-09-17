@@ -68,7 +68,7 @@ func (r *recorder) instant(kind, title string, input, output any, code, explanat
 	return r.finish(event, output, "succeeded")
 }
 
-func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, output string, mu *sync.Mutex) error {
+func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, output string, mu *sync.Mutex, prior []Message) error {
 	record := recorder{run: run, mu: mu, path: filepath.Join(output, "trace.jsonl"), started: time.Now()}
 	session := filepath.Join(output, "session.jsonl")
 	model := func(ctx context.Context, input ModelRequest) (ModelResponse, error) {
@@ -159,17 +159,21 @@ func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, outp
 		return string(raw), err
 	}
 	work := func() (string, error) {
-		if err := record.instant("input", "提交只读任务", map[string]any{"task": run.Task},
+		messages := append([]Message(nil), prior...)
+		if len(messages) == 0 {
+			messages = append(messages, Message{Role: "system", Content: systemPrompt})
+		}
+		messages = append(messages, Message{Role: "user", Content: run.Task})
+		if err := record.instant("input", "提交只读任务", map[string]any{"task": run.Task, "conversation_turn": max(1, run.ConversationTurn), "parent_run_id": run.ParentRunID},
 			map[string]any{"workspace": run.Workspace, "access": "Markdown read-only"}, "loop",
-			"任务成为本次运行的输入；文件内容必须通过工具取得。"); err != nil {
+			"用户消息成为本轮输入；追问会携带已有对话，读取新的文件内容仍须通过工具。"); err != nil {
 			return "", err
 		}
 		if err := record.instant("control", "准备上下文和请求额度",
-			map[string]any{"max_requests": run.MaxRequests, "tools": tools, "system": systemPrompt}, map[string]any{"status": "ready"}, "loop",
-			"每次运行从新的会话开始。额度限制模型请求次数，不等于工具调用次数。"); err != nil {
+			map[string]any{"max_requests": run.MaxRequests, "tools": tools, "system": messages[0].Content, "history_messages": len(prior), "parent_run_id": run.ParentRunID}, map[string]any{"status": "ready"}, "loop",
+			"新任务从空历史开始，追问携带上一轮的完整消息。额度只限制本轮模型请求次数，不等于工具调用次数。"); err != nil {
 			return "", err
 		}
-		messages := []Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: run.Task}}
 		for _, message := range messages {
 			if err := appendJSON(session, map[string]any{"type": "message", "message": message}); err != nil {
 				return "", err
