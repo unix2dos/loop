@@ -14,6 +14,12 @@
 
 打开 http://127.0.0.1:8877/。默认只读本项目 workspace/ 下的两份示例笔记。模型配置沿用环境变量 OPENAI_API_KEY、OPENAI_MODEL，以及可选的 OPENAI_BASE_URL；密钥只保留在后端。程序不会自动读取 .env 文件。
 
+更换模型只需覆盖启动环境，例如使用 OpenCode Go 的 GLM-5.3-Flash（沿用对应 API 地址与密钥）：
+
+    OPENAI_MODEL=glm-5.3-flash go run .
+
+这只设置该次服务的新任务模型；历史轨迹继续显示各次运行实际使用的模型。
+
     go run . --workspace /absolute/path/to/notes
 
 也可以编译后直接运行，运行时不需要 Python 或 Node：
