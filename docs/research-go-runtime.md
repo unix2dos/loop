@@ -52,11 +52,11 @@ Go 不是自动可靠的 Agent 语言。共享状态仍可能有 data race；官
 
 本次没有运行跨语言基准，所以不报告“Go 快几倍”。现有 Python 单次轨迹也不足以证明未来高并发容量，但可以帮助确认当前主要等待发生在哪。
 
-本机实现还存在与语言无关的性能变量：[`index.html:113`](../index.html) 每 650ms 轮询；[`app.py:342`](../app.py) 对运行做完整 deepcopy 后返回；数据含输入消息及源码；[`agent.py:13`](../agent.py) 每次写日志调用 fsync；[`app.py:290`](../app.py) 主动限制一次一个运行。这些策略不因改成 Go 自动改变。当前规模可以接受的实现，扩大规模后再按测量改为增量事件、避免重复传源码或调整持久化策略；修改 fsync 尤其涉及耐久性取舍，不能只为速度直接删掉。
+调研时的 Python 实现还存在与语言无关的性能变量：[`index.html:113`](python-reference.md) 每 650ms 轮询；[`app.py:342`](python-reference.md) 对运行做完整 deepcopy 后返回；数据含输入消息及源码；[`agent.py:13`](python-reference.md) 每次写日志调用 fsync；[`app.py:290`](python-reference.md) 主动限制一次一个运行。这些策略不因改成 Go 自动改变。当前规模可以接受的实现，扩大规模后再按测量改为增量事件、避免重复传源码或调整持久化策略；修改 fsync 尤其涉及耐久性取舍，不能只为速度直接删掉。
 
 ### 源码讲解能力必须保留
 
-当前 [`app.py:75`](../app.py) 通过 Python `inspect.getsourcelines` 在运行开始时保存函数源码，网页展示该次运行的快照。迁移不能假定 Go 反射能取得函数源码。建议把少量用于学习的 Go 源文件随构建一起 `embed`，通过固定的源码区域标记或 Go 标准库 AST 定位函数；每次运行保存对应代码文本、构建版本和内容 hash，历史记录继续显示当时的代码。`embed` 官方说明它读取编译时的文件，因此可用作这份构建所带的学习源码，而非运行时任意工作区里的最新文件。[embed](https://pkg.go.dev/embed)、[go/parser](https://pkg.go.dev/go/parser)
+当前 [`app.py:75`](python-reference.md) 通过 Python `inspect.getsourcelines` 在运行开始时保存函数源码，网页展示该次运行的快照。迁移不能假定 Go 反射能取得函数源码。建议把少量用于学习的 Go 源文件随构建一起 `embed`，通过固定的源码区域标记或 Go 标准库 AST 定位函数；每次运行保存对应代码文本、构建版本和内容 hash，历史记录继续显示当时的代码。`embed` 官方说明它读取编译时的文件，因此可用作这份构建所带的学习源码，而非运行时任意工作区里的最新文件。[embed](https://pkg.go.dev/embed)、[go/parser](https://pkg.go.dev/go/parser)
 
 ## Go + TypeScript 的接口成本怎样控制
 

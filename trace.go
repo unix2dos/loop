@@ -1,0 +1,213 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+type recorder struct {
+	run     *Run
+	mu      *sync.Mutex
+	path    string
+	started time.Time
+}
+
+func snapshot(value any) (map[string]any, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]any
+	err = json.Unmarshal(raw, &object)
+	return object, err
+}
+
+func (r *recorder) begin(kind, title string, input any, code, explanation string) (*Event, error) {
+	payload, err := snapshot(input)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	event := &Event{ID: fmt.Sprintf("e%03d", len(r.run.Events)+1), Kind: kind, Title: title, Turn: r.run.ModelRequests,
+		T: time.Since(r.started).Seconds(), Status: "running", Input: payload, Code: code, Explanation: explanation}
+	if err = appendJSON(r.path, struct {
+		Phase string `json:"phase"`
+		*Event
+	}{"start", event}); err != nil {
+		return nil, err
+	}
+	r.run.Events = append(r.run.Events, event)
+	return event, nil
+}
+
+func (r *recorder) finish(event *Event, output any, status string) error {
+	payload, err := snapshot(output)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	event.Output, event.Status, event.D = payload, status, time.Since(r.started).Seconds()-event.T
+	return appendJSON(r.path, struct {
+		Phase string `json:"phase"`
+		*Event
+	}{"finish", event})
+}
+
+func (r *recorder) instant(kind, title string, input, output any, code, explanation string) error {
+	event, err := r.begin(kind, title, input, code, explanation)
+	if err != nil {
+		return err
+	}
+	return r.finish(event, output, "succeeded")
+}
+
+func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, output string, mu *sync.Mutex) error {
+	record := recorder{run: run, mu: mu, path: filepath.Join(output, "trace.jsonl"), started: time.Now()}
+	session := filepath.Join(output, "session.jsonl")
+	model := func(ctx context.Context, input ModelRequest) (ModelResponse, error) {
+		mu.Lock()
+		run.ModelRequests++
+		number := run.ModelRequests
+		mu.Unlock()
+		event, err := record.begin("model", fmt.Sprintf("第 %d 次模型请求", number), input, "loop",
+			"这里记录实际发送的消息和工具定义。模型提出调用请求后，工具才会执行。")
+		if err != nil {
+			return ModelResponse{}, err
+		}
+		response, callErr := call(ctx, input)
+		if callErr != nil {
+			if err = record.finish(event, errorDetails(callErr), "failed"); err != nil {
+				return ModelResponse{}, err
+			}
+			return ModelResponse{}, callErr
+		}
+		if len(response.Choices) != 1 {
+			err = errors.New("invalid model choices")
+			if recordErr := record.finish(event, errorDetails(err), "failed"); recordErr != nil {
+				return ModelResponse{}, recordErr
+			}
+			return ModelResponse{}, err
+		}
+		choice := response.Choices[0]
+		choice.Message.Role = "assistant"
+		result := map[string]any{"finish_reason": choice.FinishReason, "message": choice.Message}
+		if len(response.Usage) > 0 && string(response.Usage) != "null" {
+			result["usage"] = response.Usage
+		}
+		if err = record.finish(event, result, "succeeded"); err != nil {
+			return ModelResponse{}, err
+		}
+		return response, nil
+	}
+	execute := func(ctx context.Context, tool ToolCall) (string, error) {
+		mu.Lock()
+		run.ToolCalls++
+		count := run.ToolCalls
+		mu.Unlock()
+		if err := record.instant("control", "选择只读工具执行器",
+			map[string]any{"tool": tool.Function.Name, "arguments": tool.Function.Arguments, "tool_call_id": tool.ID},
+			map[string]any{"executor": "ExecuteReadonly", "allowed_tools": []string{"list_files", "read_file"}}, "dispatch",
+			"这里选择受限执行器。参数与路径是否通过，以下一条工具事件的真实结果为准。"); err != nil {
+			return "", err
+		}
+		code := "dispatch"
+		if tool.Function.Name == "read_file" {
+			code = "read"
+		}
+		if tool.Function.Name == "list_files" {
+			code = "list"
+		}
+		event, err := record.begin("tool", tool.Function.Name, map[string]any{"arguments": tool.Function.Arguments, "tool_call_id": tool.ID}, code,
+			"执行器返回真实结果；错误也会作为工具回执进入下一轮，并保留原调用编号。")
+		if err != nil {
+			return "", err
+		}
+		var result map[string]any
+		if count > 24 {
+			result = map[string]any{"error": "tool_budget_exhausted"}
+		} else {
+			result, err = ExecuteReadonly(ctx, run.Workspace, tool)
+		}
+		if err != nil {
+			_ = record.finish(event, errorDetails(err), "failed")
+			return "", err
+		}
+		status := "succeeded"
+		if _, failed := result["error"]; failed {
+			status = "failed"
+			mu.Lock()
+			run.ToolErrors++
+			mu.Unlock()
+		}
+		if err = record.finish(event, result, status); err != nil {
+			return "", err
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return "", err
+		}
+		err = record.instant("control", "交回工具回执", map[string]any{"tool_call_id": tool.ID},
+			map[string]any{"tool_call_id": tool.ID, "content": string(raw)}, "loop",
+			"结果交回工具循环，随后作为 role=tool 消息追加，并与原 tool_call_id 配对。")
+		return string(raw), err
+	}
+	work := func() (string, error) {
+		if err := record.instant("input", "提交只读任务", map[string]any{"task": run.Task},
+			map[string]any{"workspace": run.Workspace, "access": "Markdown read-only"}, "loop",
+			"任务成为本次运行的输入；文件内容必须通过工具取得。"); err != nil {
+			return "", err
+		}
+		if err := record.instant("control", "准备上下文和请求额度",
+			map[string]any{"max_requests": run.MaxRequests, "tools": tools, "system": systemPrompt}, map[string]any{"status": "ready"}, "loop",
+			"每次运行从新的会话开始。额度限制模型请求次数，不等于工具调用次数。"); err != nil {
+			return "", err
+		}
+		messages := []Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: run.Task}}
+		for _, message := range messages {
+			if err := appendJSON(session, map[string]any{"type": "message", "message": message}); err != nil {
+				return "", err
+			}
+		}
+		return RunLoop(ctx, model, execute, run.Model, tools, messages, session, run.MaxRequests)
+	}
+	answer, runErr := work()
+	status, title := "completed", "正常结束"
+	var detail map[string]any
+	if runErr != nil {
+		status, title = "failed", "运行失败"
+		detail = errorDetails(runErr)
+		if errors.Is(runErr, errBudget) {
+			status, title = "budget_exhausted", "达到请求上限"
+		}
+	}
+	event, err := record.begin("control", title, map[string]any{"model_requests": run.ModelRequests, "max_requests": run.MaxRequests}, "loop",
+		"正常结束只说明循环结束，不证明回答正确或任务验收通过。")
+	if err == nil {
+		eventStatus := "succeeded"
+		if runErr != nil {
+			eventStatus = "failed"
+		}
+		err = record.finish(event, map[string]any{"run_status": status, "task_result": "not_evaluated", "error": detail}, eventStatus)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	run.Status, run.Answer, run.Error, run.Duration = status, answer, detail, time.Since(record.started).Seconds()
+	if err != nil {
+		run.Status = "failed"
+		run.Error = map[string]any{"error_type": "StorageError", "message": "本地运行记录写入失败"}
+		return err
+	}
+	if err = saveRun(filepath.Join(output, "run.json"), run); err != nil {
+		run.Status = "failed"
+		run.Error = map[string]any{"error_type": "StorageError", "message": "本地运行记录保存失败"}
+		return err
+	}
+	return nil
+}

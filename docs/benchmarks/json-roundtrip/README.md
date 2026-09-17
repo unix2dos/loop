@@ -33,6 +33,6 @@
     go build -o /tmp/levon-json-bench docs/benchmarks/json-roundtrip/bench.go
     /tmp/levon-json-bench /path/to/input.json 200 /tmp/go-roundtrip.json
     node docs/benchmarks/json-roundtrip/bench.js /path/to/input.json 200 /tmp/node-roundtrip.json
-    .venv/bin/python docs/benchmarks/json-roundtrip/bench.py /path/to/input.json 200 /tmp/python-roundtrip.json
+    python3 docs/benchmarks/json-roundtrip/bench.py /path/to/input.json 200 /tmp/python-roundtrip.json
 
 合成大输入把迭代次数改为 12。输入未加入版本库，避免将个人运行材料复制进研究脚本。

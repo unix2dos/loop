@@ -1,0 +1,187 @@
+[
+  {
+    "name": "batch",
+    "budget": 4,
+    "responses": [
+      {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "message": {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "list-1",
+                  "type": "function",
+                  "function": {
+                    "name": "list_files",
+                    "arguments": "{\"path\":\".\"}"
+                  }
+                },
+                {
+                  "id": "read-1",
+                  "type": "function",
+                  "function": {
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"note.md\"}"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "ACTUAL_CONTENT_73"
+            }
+          }
+        ]
+      }
+    ],
+    "status": "completed",
+    "requests": 2,
+    "tools": 2,
+    "tool_errors": 0,
+    "answer": "ACTUAL_CONTENT_73"
+  },
+  {
+    "name": "budget",
+    "budget": 1,
+    "responses": [
+      {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "message": {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "list-1",
+                  "type": "function",
+                  "function": {
+                    "name": "list_files",
+                    "arguments": "{\"path\":\".\"}"
+                  }
+                },
+                {
+                  "id": "read-1",
+                  "type": "function",
+                  "function": {
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"note.md\"}"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "ACTUAL_CONTENT_73"
+            }
+          }
+        ]
+      }
+    ],
+    "status": "budget_exhausted",
+    "requests": 1,
+    "tools": 2,
+    "tool_errors": 0,
+    "answer": ""
+  },
+  {
+    "name": "truncated",
+    "budget": 4,
+    "responses": [
+      {
+        "choices": [
+          {
+            "finish_reason": "length",
+            "message": {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "list-1",
+                  "type": "function",
+                  "function": {
+                    "name": "list_files",
+                    "arguments": "{\"path\":\".\"}"
+                  }
+                },
+                {
+                  "id": "read-1",
+                  "type": "function",
+                  "function": {
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"note.md\"}"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "status": "failed",
+    "requests": 1,
+    "tools": 0,
+    "tool_errors": 0,
+    "answer": ""
+  },
+  {
+    "name": "missing-file",
+    "budget": 4,
+    "responses": [
+      {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "message": {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "missing",
+                  "type": "function",
+                  "function": {
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"missing.md\"}"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "message": {
+              "role": "assistant",
+              "content": "证据不足"
+            }
+          }
+        ]
+      }
+    ],
+    "status": "completed",
+    "requests": 2,
+    "tools": 1,
+    "tool_errors": 1,
+    "answer": "证据不足"
+  }
+]
