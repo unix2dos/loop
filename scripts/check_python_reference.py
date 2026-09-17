@@ -7,7 +7,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 fixtures = root / "testdata/loop-cases.json"
-with tempfile.TemporaryDirectory(prefix="levon-python-reference-") as temporary:
+with tempfile.TemporaryDirectory(prefix="loop-python-reference-") as temporary:
     target = Path(temporary)
     for name in ("agent.py", "app.py", "client.py", "check.py"):
         target.joinpath(name).write_bytes(subprocess.check_output(

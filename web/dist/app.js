@@ -239,7 +239,7 @@ $("download").onclick = () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(run, null, 2)], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "levon-run-" + run.id + ".json";
+    anchor.download = "loop-run-" + run.id + ".json";
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };

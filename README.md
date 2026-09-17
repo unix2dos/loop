@@ -1,23 +1,31 @@
-# Levon
+# Loop
 
-看清 Agent 的每一步。
+**运行 Agent，看清每一步。**
 
-A local Agent learning workbench: inspect real runs, connect traces to source code, and test your understanding.
+A local Agent workbench for running tasks, inspecting real traces, and connecting behavior to source code.
 
-一个面向学习与个人使用的 Agent 实验台：通过真实轨迹，把模型输入、工具结果、停止原因与核心代码对应起来，再改变条件验证理解。
+Loop 是一个本地 Agent 实验台。你提交任务，它调用模型、执行工具、收集回执并继续；你可以在网页里查看真实输入输出、耗时、停止原因，以及对应的核心代码。
 
-当前实现为 **Go 运行内核 + TypeScript 网页**，沿用已确认的时间轴、事件列表与详情侧栏。[架构决策](docs/adr/0001-go-runtime-typescript-ui.md)
+当前版本适合阅读 Markdown 笔记、核对书稿和学习工具调用循环。采用 **Go 内核 + TypeScript 网页**，只开放指定目录中的文件列表和 Markdown 读取。项目原名 Levon，现统一更名为 Loop。
 
-## 启动
+## 第一次使用
 
-需要 Go 1.24 或更新版本，以及支持 Chat Completions 工具调用的模型服务。先克隆项目：
+### 1. 准备环境
+
+- 安装 Git 和 [Go 1.24 或更新版本](https://go.dev/doc/install)，运行 `go version` 确认安装成功。
+- 准备模型服务的 API Key、模型 ID 和 API 基础地址。模型需要支持兼容 OpenAI Chat Completions 格式的工具调用。
+- 只运行 Loop 不需要安装 Python、Node 或 OpenCode CLI。模型调用使用你自己的服务额度。
+
+### 2. 克隆项目
 
 ```sh
-git clone https://github.com/unix2dos/levon.git
-cd levon
+git clone https://github.com/unix2dos/loop.git
+cd loop
 ```
 
-在启动服务的终端中设置你自己的模型配置，再运行：
+### 3. 配置模型并启动
+
+以下命令适用于 macOS / Linux 的 bash 或 zsh。替换三个占位值，并在同一个终端启动：
 
 ```sh
 export OPENAI_API_KEY='your-api-key'
@@ -26,75 +34,187 @@ export OPENAI_BASE_URL='https://your-provider.example/v1'
 go run .
 ```
 
-将上面的三个占位值替换为服务商提供的配置。OPENAI_BASE_URL 未设置时使用 https://api.openai.com/v1；变量名表示兼容接口格式，不限制模型厂商。程序不会自动读取 .env 文件，配置示例见 [.env.example](.env.example)。
+| 变量 | 填什么 |
+|---|---|
+| `OPENAI_API_KEY` | 你在模型服务商处取得的 API Key，不能用网页聊天产品的登录密码代替 |
+| `OPENAI_MODEL` | 该接口支持的模型 ID |
+| `OPENAI_BASE_URL` | API 基础地址；**不要包含 `/chat/completions`**，Loop 会自动追加。未设置时默认 `https://api.openai.com/v1` |
 
-打开 http://127.0.0.1:8877/。默认只读本项目 workspace/ 下的两份示例笔记。密钥只用于后端模型请求，不发送到网页；工作区中被读取的内容会作为上下文发送给你配置的模型服务。
+这些变量名表示兼容接口格式，不限制模型厂商。当前只实现 Chat Completions 调用，不支持直接使用 Responses 或 Anthropic Messages 地址。
 
-更换模型只需覆盖启动环境，例如使用 OpenCode Go 的 GLM-5.3-Flash（沿用对应 API 地址与密钥）：
+<details>
+<summary>示例：已有 OpenCode Go 账号，使用 GLM-5.3-Flash</summary>
 
-    OPENAI_MODEL=glm-5.3-flash go run .
+```sh
+export OPENAI_API_KEY='your-opencode-go-api-key'
+export OPENAI_MODEL='glm-5.3-flash'
+export OPENAI_BASE_URL='https://opencode.ai/zen/go/v1'
+go run .
+```
 
-这只设置该次服务的新任务模型；历史轨迹继续显示各次运行实际使用的模型。
+模型 ID 和地址见 [OpenCode Go 官方说明](https://opencode.ai/docs/go/#endpoints)。该组合已在本项目中完成真实工具调用验证；可用模型以服务商当前配置为准。Loop 自己执行 Agent 循环，OpenCode Go 在这里提供模型 API。客户端会发送自己的 User-Agent 和稳定的会话 ID，符合其[接入要求](https://opencode.ai/docs/go/#where-can-i-use-it)。
 
-    go run . --workspace /absolute/path/to/notes
+</details>
 
-也可以编译后直接运行，运行时不需要 Python 或 Node：
+<details>
+<summary>希望把配置保存在本地 .env 文件中</summary>
 
-    go build -o levon .
-    ./levon --workspace /absolute/path/to/notes
+先执行 `cp .env.example .env`，用编辑器填入你自己的配置，然后运行：
 
-状态目录默认是当前目录下的 .agent_state/runs，可用 --state-dir 指定。模型请求保留原有的兼容 Chat Completions 格式，以 Go 标准库 HTTP 调用；不声称覆盖厂商 SDK 的全部功能。错误会转换成明确且不含凭证的记录。
+```sh
+set -a
+. ./.env
+set +a
+go run .
+```
 
-## 第一个实验
+**Loop 不会自动读取 `.env`**，上面的命令由 shell 加载配置。`.env` 已被 Git 忽略；示例只用于 bash/zsh。不要把真实密钥提交到仓库。
 
-先预测：模型请求上限为 1，第一轮提出工具请求时，工具是否执行？程序还会不会请求模型继续？再运行任务，查看调用与停止位置。学习实验需要使用者自己的预测和解释，程序测试通过不等于已经掌握。
+</details>
 
-每次提交创建独立运行。记录保存在 .agent_state/runs/<run-id>/，包括 run.json、trace.jsonl 与 session.jsonl，可从页面导出 JSON。重启会载入最近八次有效、已结束的运行；无效或未结束的记录会跳过并提示，原文件保留。回看不会调用模型、重新执行工具或恢复任务。
+<details>
+<summary>Windows PowerShell 的环境变量写法</summary>
 
-旧 Python 记录保留当时的路径和源码。新 Go 记录保存编译时嵌入的函数源码，以及嵌入源码和资源的摘要标识；重新编译才会更新这些内容，历史记录不会被当前源码覆盖。
+在项目目录运行：
 
-## 代码入口
+```powershell
+$env:OPENAI_API_KEY = 'your-api-key'
+$env:OPENAI_MODEL = 'your-model-id'
+$env:OPENAI_BASE_URL = 'https://your-provider.example/v1'
+go run .
+```
 
-- [agent.go](agent.go)：模型请求、同批工具回执与停止条件。
-- [tools.go](tools.go)：只读工具的参数与路径检查。
-- [model.go](model.go)：模型 HTTP 连接、超时与错误转换。
-- [trace.go](trace.go)：实际输入输出与耗时记录。
-- [storage.go](storage.go)：日志、历史加载和源码快照。
-- [server.go](server.go)：本机 HTTP 接口与单任务运行控制。
-- [web/src/app.ts](web/src/app.ts)、[web/src/types.ts](web/src/types.ts)：界面逻辑与接口类型。
-- [runtime_test.go](runtime_test.go)：离线行为、路径边界、历史及 HTTP 检查。
+</details>
 
-## 开发与检查
+保持终端运行，在浏览器打开 **[http://127.0.0.1:8877/](http://127.0.0.1:8877/)**。启动成功后，终端会显示网页地址和只读工作区。首次打开没有历史记录，提交任务后才会生成轨迹。
 
-修改 TypeScript 时需要 Node/npm：
+### 4. 提交第一个任务
 
-    npm ci
-    npm run typecheck
-    npm run build
-    go test -race ./...
+默认工作区是项目自带的 `workspace/`，包含两份示例笔记，可以直接体验：
 
-web/dist/ 中的构建产物随源码提交，Go 编译时将其嵌入，因此只运行 Go 后端不需要先安装前端工具。修改 TypeScript 后应同步构建产物，并重新编译或重启 go run。
+1. 将网页中的“模型请求上限”保持为 **4**。
+2. 在任务框粘贴下面的内容。
+3. 点击“运行任务”，等待模型和工具返回。
 
-保留的 Python 对照版本位于 python-reference 标签。若本机有 Python 3.10+，可用相同的四组固定响应和真实文件检查对照版本；无需调用模型或安装 Python SDK：
+> 先列出工作区文件，再读取 agent-loop.md。用两句话说明工具结果怎样返回模型，并引用一处原文作为依据。
 
-    python3 -B scripts/check_python_reference.py
+通常会看到“请求模型 → 列出文件 → 再次请求模型 → 读取笔记 → 最终回答”。具体调用次数由模型实际回复决定。一次模型回复可以提出多个工具调用。
 
-完整对照说明见 [Python 参考版本](docs/python-reference.md)。
+切换到“对话”查看答案，并对照 [示例笔记](workspace/agent-loop.md) 核对引文。`completed` 只表示循环正常结束，任务结果仍需你验收；`budget_exhausted` 表示模型请求额度耗尽、无法继续。
 
-## 当前范围
+### 5. 看懂这次轨迹
 
-本机、单人、一次一个任务，只开放指定目录内的 Markdown 列表和读取。没有 Shell、写入、实时暂停、后台恢复或多 Agent。模型 HTTP 请求超时为 60 秒，不自动重试；关闭网页不会取消已提交任务。
+点击时间轴色块或事件列表中的一行，在右侧查看：
 
-正常结束不等于任务验收通过。路径校验不等同于操作系统 Sandbox。历史输入与输出包含任务材料，状态目录默认不进入 Git。
+| 页面位置 | 能看到什么 |
+|---|---|
+| `MODEL` → 输入 / 输出 | 发给模型的消息和工具定义，以及它返回的回答、工具请求和 `finish_reason` |
+| `TOOL` → 输入 / 输出 | 实际工具参数、文件内容或错误回执 |
+| `HARNESS` | 准备上下文、选择执行器、交回工具回执及停止等程序动作 |
+| 核心代码 | 该次运行保存的相关函数源码；新 Go 运行使用编译时嵌入的代码 |
+| 搜索事件或工具 | 按事件名称、角色及摘要筛选，如输入 `read_file` |
+| 导出轨迹 | 下载完整的 `loop-run-<id>.json`，即使页面已筛选也会导出整次运行 |
 
-对于 opencode.ai，客户端使用自己的 User-Agent 与稳定会话 ID，遵循其[公开接入协议](https://opencode.ai/docs/go/#where-can-i-use-it)。其他服务不发送该专用会话头。
+例如，在读取文件之后的 `MODEL` 输入中寻找 `role: "tool"`，就能看到工具回执怎样随下一次请求交给模型。轨迹记录可观察的请求和结果，不代表模型内部不可见的思考过程。
 
-当前为早期学习项目，接口与运行记录格式可能变化。本机运行问题与验证记录见 [运行说明](docs/operations.md)。
+## 换成自己的资料
 
-## 参与
+先等当前任务结束，在启动终端按 `Ctrl+C`，再指定一个已经存在的目录：
 
-欢迎通过 [Issues](https://github.com/unix2dos/levon/issues) 分享可复现的问题或具体学习实验，通过 Pull Request 提交改进。提交前运行上面的开发检查；报告问题时请删除 API 密钥、私有路径和任务材料。导出的轨迹可能包含完整模型输入、工具结果和源码快照，请先检查再分享。
+```sh
+go run . --workspace '/absolute/path/to/your-notes'
+```
 
-## 许可证
+建议先选一个只含少量 `.md` 文件的目录。工具路径相对于这个工作区：列根目录使用 `.`，读取文件使用 `chapter.md`，不要把电脑上的绝对路径直接交给工具。目录列表不递归；新用户可以先把要比较的 Markdown 放在同一层。
 
-[MIT](LICENSE) · Copyright (c) 2026 Levon (unix2dos).
+可以尝试：
+
+> 先列出工作区文件，比较 intro.md 与 tools.md 对 Tool Result 的定义。如果表述冲突，给出两处原文和修改建议。只读，不修改文件。
+
+将文件名换成你自己的。当前只返回分析和建议，不会修改书稿。每次点击“运行任务”都会创建独立 Run，不会自动延续上一次任务的对话。
+
+## 两个学习实验
+
+先预测，再运行，再根据轨迹解释结果。它们都会真实调用模型，具体动作以轨迹为准。
+
+**实验一：请求额度。** 将模型请求上限改为 **1**，提交“请先调用 list_files，path 使用 .，拿到结果后再回答有哪些文件”。如果模型第一轮提出工具请求，工具会执行；之后没有额度继续请求模型，因此可能没有最终回答。模型请求次数与工具调用次数分别计数。
+
+**实验二：错误恢复。** 使用默认示例工作区，将上限改为 **6**，提交：
+
+> 先列出工作区文件。为了观察错误回执，请原样读取 agent-looop.md，不要预先纠正拼写。等错误返回后，再根据目录结果选择正确文件读取，最后解释工具回执如何返回模型。只读。
+
+观察失败的 `read_file`、下一次模型请求中的错误回执，以及模型是否提出纠正后的读取。错误是实验中故意设置的，不能据此宣称模型在其他任务中总能自行恢复。
+
+## 保存、重启与配置
+
+运行记录默认保存在 `.agent_state/runs/<run-id>/`，包括 `run.json`、`trace.jsonl` 与 `session.jsonl`。重启会载入最近 **8 次有效、已结束**的运行；无效或未结束的记录会跳过并提示，原文件保留。历史回看不会调用模型、重新执行工具或恢复任务。
+
+```sh
+go run . --port 8878 --workspace '/absolute/path/to/notes' --state-dir '/absolute/path/to/loop-runs'
+```
+
+| 参数 | 默认值 | 用途 |
+|---|---|---|
+| `--port` | `8877` | 本机网页端口 |
+| `--workspace` | `workspace` | 只读资料目录 |
+| `--state-dir` | `.agent_state/runs` | 运行记录目录 |
+
+相对路径以启动命令所在目录为准。历史记录继续显示当时的工作区、模型和源码；更换模型或目录只影响新任务。关闭网页不会取消已提交的任务，停止进程会中断仍在运行的任务。
+
+也可以编译后运行；二进制嵌入网页，仍需单独提供资料目录和模型配置：
+
+```sh
+go build -o loop .
+./loop --workspace ./workspace
+```
+
+## 常见问题
+
+| 现象 | 检查方法 |
+|---|---|
+| `go: command not found` | 安装 Go，重新打开终端，确认 `go version` 可用 |
+| 页面提示“模型配置未就绪” | 在启动服务的同一终端设置 Key 和模型；只创建 `.env` 文件不会自动加载。修改后重启服务 |
+| 模型请求失败 | 点击失败的 `MODEL` 事件，检查错误类型和可用的 HTTP 状态；核对 Key、模型 ID、基础地址、额度及网络。当前单次请求超时 60 秒，不自动重试 |
+| 工具返回 `tool_rejected` | 检查相对路径、文件是否存在、是否为普通 UTF-8 `.md` 文件，以及参数类型；该错误也可能表示权限边界拒绝 |
+| 运行停在“模型请求额度耗尽” | 查看已执行步骤，再增加上限提交新任务；当前运行不会自动续跑 |
+| `address already in use` | 已有服务占用端口，使用 `go run . --port 8878`，并打开对应地址 |
+| 程序提示工作区不存在 | 确认在仓库根目录启动，或通过 `--workspace` 指定现有目录 |
+| 改了代码但网页没变化 | TypeScript 修改后执行 `npm run build`，再重新编译或重启 `go run .`；查看旧运行仍会显示旧源码 |
+
+## 当前范围与数据
+
+Loop 是本机、单人、一次一个任务的早期项目。当前没有 Shell、文件写入、实时暂停、后台恢复、多 Agent 或插件系统。模型请求上限可选 1～8；每个 Run 的前 24 次工具调用尝试可以进入只读执行器，后续调用只返回额度耗尽的错误回执。工具失败不一定让整个 Run 立即结束。
+
+密钥只用于后端模型请求，不发送到网页；工具读取的资料会作为上下文发送给你配置的模型服务。输入、输出和资料内容会保存在本地轨迹中，分享导出的 JSON 前请检查内容。状态目录默认不进入 Git，路径校验也不等同于操作系统 Sandbox。
+
+## 开发与源码
+
+只运行 Go 服务无需 Node；修改网页 TypeScript 时需要 Node/npm：
+
+```sh
+npm ci
+npm run typecheck
+npm run build
+go test -race ./...
+```
+
+`web/dist/` 的构建产物随源码提交，并由 Go 编译时嵌入。
+
+| 文件 | 职责 |
+|---|---|
+| [agent.go](agent.go) | 模型请求循环、同批工具回执、停止条件 |
+| [tools.go](tools.go) | 只读工具、参数及路径检查 |
+| [model.go](model.go) | 模型 HTTP 请求、超时与错误转换 |
+| [trace.go](trace.go) | 实际事件记录、工具额度及运行状态 |
+| [storage.go](storage.go) | 日志、历史加载和源码快照 |
+| [server.go](server.go) | 本机 HTTP 接口和单任务控制 |
+| [web/src/app.ts](web/src/app.ts) | 网页交互与轨迹呈现 |
+| [runtime_test.go](runtime_test.go) | 离线行为、路径边界、历史及 HTTP 检查 |
+
+早期 Python 实现保存在 `python-reference` 标签中。有 Python 3.10+ 时可运行 `python3 -B scripts/check_python_reference.py` 做离线行为对照。详见 [Python 参考版本](docs/python-reference.md)、[架构决策](docs/adr/0001-go-runtime-typescript-ui.md)和[运行记录](docs/operations.md)。
+
+## 参与与许可证
+
+欢迎在 [Issues](https://github.com/unix2dos/loop/issues) 提交可复现的问题或具体学习实验，通过 Pull Request 提交改进。报告问题时请删除凭证和私人任务材料。
+
+[MIT](LICENSE) · Copyright (c) 2026 Levon (unix2dos). Levon 为作者署名。

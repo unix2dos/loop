@@ -1,6 +1,6 @@
-# Levon
+# Loop
 
-Levon is an Agent learning workbench, used first by its author and shaped by real experiments.
+Loop is an Agent learning workbench, used first by its author and shaped by real experiments.
 
 ## Language
 

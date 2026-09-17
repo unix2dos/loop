@@ -48,7 +48,7 @@ func HTTPModel(runID string) (ModelCaller, string, error) {
 		}
 		request.Header.Set("Authorization", "Bearer "+key)
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("User-Agent", "levon/0.1")
+		request.Header.Set("User-Agent", "loop/0.1")
 		if endpoint.Hostname() == "opencode.ai" {
 			request.Header.Set("x-opencode-session", runID)
 		}

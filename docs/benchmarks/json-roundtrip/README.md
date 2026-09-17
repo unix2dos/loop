@@ -30,8 +30,8 @@
 
 准备任意 run.json；要复现原输入，需要本机已保存的上述运行记录。大输入按前述方法构造。以下命令不会调用模型或启动应用：
 
-    go build -o /tmp/levon-json-bench docs/benchmarks/json-roundtrip/bench.go
-    /tmp/levon-json-bench /path/to/input.json 200 /tmp/go-roundtrip.json
+    go build -o /tmp/loop-json-bench docs/benchmarks/json-roundtrip/bench.go
+    /tmp/loop-json-bench /path/to/input.json 200 /tmp/go-roundtrip.json
     node docs/benchmarks/json-roundtrip/bench.js /path/to/input.json 200 /tmp/node-roundtrip.json
     python3 docs/benchmarks/json-roundtrip/bench.py /path/to/input.json 200 /tmp/python-roundtrip.json
 

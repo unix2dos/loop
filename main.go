@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Levon：http://%s\n只读 Markdown 工作区：%s\n", listener.Addr(), app.workspace)
+	fmt.Printf("Loop：http://%s\n只读 Markdown 工作区：%s\n", listener.Addr(), app.workspace)
 	server := &http.Server{Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Fatal(server.Serve(listener))
 }

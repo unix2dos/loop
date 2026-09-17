@@ -247,7 +247,7 @@ func TestHistoryAndHTTP(t *testing.T) {
 func TestModelTransport(t *testing.T) {
 	example := cases(t)[0].Responses[0]
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer fake-test-key" || r.Header.Get("User-Agent") != "levon/0.1" {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer fake-test-key" || r.Header.Get("User-Agent") != "loop/0.1" {
 			t.Error("wire contract mismatch")
 		}
 		if r.Header.Get("x-opencode-session") != "" {

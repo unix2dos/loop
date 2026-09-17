@@ -222,7 +222,7 @@ $("task-form").addEventListener("submit", async event => {
 $("download").onclick = () => {
   if (!run) return;
   const url = URL.createObjectURL(new Blob([JSON.stringify(run, null, 2)], { type: "application/json" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = "levon-run-" + run.id + ".json";
+  const anchor = document.createElement("a"); anchor.href = url; anchor.download = "loop-run-" + run.id + ".json";
   anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 async function initialize(): Promise<void> {

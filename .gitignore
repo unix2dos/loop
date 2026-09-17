@@ -9,4 +9,5 @@ __pycache__/
 .playwright-mcp/
 node_modules/
 /levon
+/loop
 /dist/

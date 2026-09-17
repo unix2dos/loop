@@ -1,4 +1,4 @@
-# Levon 技术栈选型调研
+# Loop 技术栈选型调研
 
 日期：2026-09-17。用户已认可 Go 内核 + TypeScript 网页路线，已记录为 [ADR-0001](adr/0001-go-runtime-typescript-ui.md)。本文保留调研时的证据与判断；后续实施已迁移入口，参见[当前启动说明](../README.md)及[Python 对照版本](python-reference.md)。调研与后续实施是不同阶段。
 
@@ -72,7 +72,7 @@ Go goroutine 的调度与多核能力见 [Go FAQ](https://go.dev/doc/faq#gorouti
 
 OpenCode 虽以 TS 为主，其 SDK 仍通过 HTTP 控制服务，类型从 OpenAPI 生成，事件通过 SSE 订阅。DeepSeek SDK 则以 JSON-RPC 驱动进程。由此不能把“全 TS”理解为“没有通信与契约成本”。[OpenCode SDK](https://opencode.ai/docs/sdk/)、[DeepSeek SDK](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/sdk/README.md)
 
-对 Levon 而言，代价是需要作者持续理解一个较不熟悉的内核语言。当前只有少量接口，还没有决定依赖 TS-only 插件/内核包，统一类型的收益不足以单独压过 Go 熟悉度。这是项目判断，不是否定 TS。
+对 Loop 而言，代价是需要作者持续理解一个较不熟悉的内核语言。当前只有少量接口，还没有决定依赖 TS-only 插件/内核包，统一类型的收益不足以单独压过 Go 熟悉度。这是项目判断，不是否定 TS。
 
 ## 4. Go + TS 的工程方案
 
