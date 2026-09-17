@@ -30,7 +30,54 @@ const batchStates = new Map<string, boolean>();
 let items: RunSummary[] = [], page: "home" | "new" | "run" = "home";
 function readPreference(key: string, fallback = false): boolean { try { const value = localStorage.getItem(key); return value === null ? fallback : value === "true"; } catch { return fallback; } }
 let sidebarCollapsed = readPreference("loop.sidebarCollapsed", innerWidth < 900), traceCollapsed = readPreference("loop.traceCollapsed");
-function savePreference(key: string, value: boolean): void { try { localStorage.setItem(key, String(value)); } catch { /* Browser storage is optional. */ } }
+function savePreference(key: string, value: boolean | number): void { try { localStorage.setItem(key, String(value)); } catch { /* Browser storage is optional. */ } }
+let conversationShare = .65;
+try {
+ const saved = Number(localStorage.getItem("loop.conversationShare"));
+ if (Number.isFinite(saved) && saved > 0 && saved < 1) conversationShare = saved;
+} catch { /* Browser storage is optional. */ }
+const splitter = $("trace-resize"), workbench = $("workbench");
+function updateSplitWidth(share?: number): void {
+ if (!splitter.offsetWidth) return; // Hidden in collapsed, focused and phone layouts.
+ const available = workbench.clientWidth - splitter.offsetWidth;
+ if (available <= 0) return;
+ const minimum = Math.min(280, available / 2);
+ const left = Math.max(minimum, Math.min(available - minimum, available * (share ?? conversationShare)));
+ if (share !== undefined) conversationShare = left / available;
+ workbench.style.setProperty("--conversation-size", left + "px");
+ const percent = Math.round(left / available * 100);
+ splitter.setAttribute("aria-valuenow", String(percent));
+ splitter.setAttribute("aria-valuemin", String(Math.ceil(minimum / available * 100)));
+ splitter.setAttribute("aria-valuemax", String(Math.floor((available - minimum) / available * 100)));
+ splitter.setAttribute("aria-valuetext", `对话 ${percent}%，执行轨迹 ${100-percent}%`);
+}
+let dragOffset = 0;
+splitter.onpointerdown = event => {
+ if (event.button !== 0 || !event.isPrimary) return;
+ event.preventDefault(); splitter.focus();
+ dragOffset = event.clientX - splitter.getBoundingClientRect().left;
+ splitter.setPointerCapture(event.pointerId);
+ document.body.classList.add("resizing-trace");
+};
+splitter.onpointermove = event => {
+ if (!splitter.hasPointerCapture(event.pointerId)) return;
+ const available = workbench.clientWidth - splitter.offsetWidth;
+ if (available > 0) updateSplitWidth((event.clientX - workbench.getBoundingClientRect().left - dragOffset) / available);
+};
+splitter.onpointerup = event => { if (splitter.hasPointerCapture(event.pointerId)) splitter.releasePointerCapture(event.pointerId); };
+splitter.onlostpointercapture = () => {
+ document.body.classList.remove("resizing-trace");
+ savePreference("loop.conversationShare", conversationShare);
+};
+splitter.ondblclick = () => { updateSplitWidth(.65); savePreference("loop.conversationShare", conversationShare); };
+splitter.onkeydown = event => {
+ if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+ event.preventDefault();
+ const current = Number(splitter.getAttribute("aria-valuenow")) / 100;
+ updateSplitWidth(event.key === "Home" ? 0 : event.key === "End" ? 1 : current + (event.key === "ArrowLeft" ? -.02 : .02));
+ savePreference("loop.conversationShare", conversationShare);
+};
+new ResizeObserver(() => updateSplitWidth()).observe(workbench);
 const number = (value: number | undefined): string => value === undefined ? "未返回" : value.toLocaleString("zh-CN");
 function totalTokens(current: Run): string {
  const usage = runUsage(current);
@@ -49,6 +96,7 @@ function applyLayout(): void {
  $("trace-summary").setAttribute("aria-expanded", String(!traceCollapsed));
  $("task-home").hidden = page !== "home";
  $("workbench").hidden = page === "home";
+ updateSplitWidth();
 }
 function updateURL(id: string | null, fresh = false): void {
  const url = new URL(location.href); url.search = ""; url.hash = "";
@@ -166,7 +214,7 @@ function rowText(event: TraceEvent): string {
 function eventRow(event: TraceEvent, related: Set<string>): string {
  const usage = tokenUsage(event), text = rowText(event);
  const modelTokens = event.kind === "model" ? `<small>${usage.total === undefined ? event.status === "running" ? "等待用量" : "Token 未返回" : number(usage.total) + " tokens"}</small>` : "";
- return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}">${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark">请求 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
+ return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}"${rowRole(event) === "PROGRAM" ? ' title="程序控制：Loop 自身的调度步骤，例如选择工具执行器；不是模型消息角色。"' : ""}>${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark">请求 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
 }
 function callFor(id: string): { call: CallLink; model: TraceEvent } | undefined {
   for (const step of graph.steps) for (const call of step.calls) if (call.tool?.id === id || call.receipt?.id === id) return { call, model: step.model };
