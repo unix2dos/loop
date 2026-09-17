@@ -261,7 +261,7 @@ function rowRole(event) {
         return "RESULT";
     if (typeof event.output?.run_status === "string")
         return "STOP";
-    return "PROGRAM";
+    return "HARNESS";
 }
 function rowText(event) {
     if (event.status === "running")
@@ -286,7 +286,7 @@ function rowText(event) {
 function eventRow(event, related) {
     const usage = tokenUsage(event), text = rowText(event);
     const modelTokens = event.kind === "model" ? `<small>${usage.total === undefined ? event.status === "running" ? "等待用量" : "Token 未返回" : number(usage.total) + " tokens"}</small>` : "";
-    return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}"${rowRole(event) === "PROGRAM" ? ' title="程序控制：Loop 自身的调度步骤，例如选择工具执行器；不是模型消息角色。"' : ""}>${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark">请求 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
+    return `<button id="node-${esc(event.id)}" class="trace-row kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" aria-pressed="${selected === event.id}" title="${esc(event.id + " · " + event.title + " · " + text.slice(0, 500))}"><span class="row-index">${esc(event.id.replace(/^e0*/, "") || "0")}</span><span class="role-tag role-${rowRole(event).toLowerCase()}"${rowRole(event) === "HARNESS" ? ' title="Harness 控制步骤，例如选择工具执行器。上下文准备、回执回填和停止控制也属于 Harness 的职责；此标签不是模型消息角色。"' : ""}>${rowRole(event)}</span><span class="row-content">${event.kind === "model" ? `<span class="request-mark" title="模型轮次：一次模型请求及其引发的工具处理；同批多个工具属于同一轮，不是用户对话轮次。">模型轮次 ${event.turn}</span>` : ""}${esc(text.replace(/\s+/g, " ").slice(0, 700))}</span><span class="row-metric">${event.status === "running" ? "进行中" : formatDuration(event.d)}${modelTokens}</span></button>`;
 }
 function callFor(id) {
     for (const step of graph.steps)
@@ -300,7 +300,7 @@ function renderGraph(current) {
     const related = relatedEvents(graph, selected);
     const elapsed = current.status === "running" ? Math.max(0, Date.now() / 1000 - current.created_at) : current.duration ?? 0;
     const timeline = timelineLayout(current, "time", elapsed), steps = timelineLayout(current, "steps");
-    const lanes = [["input", "输入"], ["model", "模型"], ["tool", "工具"], ["control", "程序"]];
+    const lanes = [["input", "输入"], ["model", "模型"], ["tool", "工具"], ["control", "Harness"]];
     const marker = (event, left, width, step = false) => `<button class="timeline-bar kind-${event.kind} ${event.status} ${selected === event.id ? "selected" : ""} ${related.has(event.id) ? "related" : ""}" data-event="${esc(event.id)}" style="left:${left * 100}%;width:${width * 100}%" aria-pressed="${selected === event.id}" aria-label="${step ? "步骤" : "耗时"} ${esc(event.id + " " + title(event))}" title="${esc(event.id + " · " + title(event) + " · " + (event.status === "running" ? "进行中" : formatDuration(event.d)))}">${step ? esc(event.id.replace(/^e0*/, "")) : ""}</button>`;
     setHTML("timeline", `<div class="timeline-lane step-lane"><span>步骤</span><div class="step-track">${steps.bars.map(({ event, left, width }) => marker(event, left, width, true)).join("")}</div></div><div class="timeline-axis"><span>耗时</span><div>${[0, .5, 1].map(n => `<span>${(timeline.extent * n).toFixed(2)}s</span>`).join("")}</div></div>${lanes.map(([kind, label]) => `<div class="timeline-lane"><span>${label}</span><div class="lane-track">${timeline.bars.filter(bar => bar.event.kind === kind).map(({ event, left, width }) => marker(event, left, width)).join("")}</div></div>`).join("")}`);
     let html = graph.unlinkedTools.length ? `<p class="stream-note">${graph.unlinkedTools.length} 条工具记录的调用来源尚未核对，以下按原始顺序保留。</p>` : "";
@@ -312,12 +312,12 @@ function renderGraph(current) {
             html += `<section class="stream-section phase-${section.kind}" aria-label="${section.kind === "start" ? "任务与上下文" : "运行结束"}">${section.events.map(event => eventRow(event, related)).join("")}</section>`;
             continue;
         }
-        html += `<section class="stream-section phase-request" aria-label="模型请求 ${section.anchor.turn}">${eventRow(section.anchor, related)}`;
+        html += `<section class="stream-section phase-request" aria-label="模型轮次 ${section.anchor.turn}">${eventRow(section.anchor, related)}`;
         if (rest.length) {
             const open = batchStates.get(section.anchor.id) ?? current.events.length <= 12;
             const names = rest.filter(event => event.kind === "tool").map(event => event.title);
             const errors = rest.filter(event => event.kind === "tool" && event.status === "failed").length;
-            html += `<button id="batch-${esc(section.anchor.id)}" class="batch-summary ${errors ? "has-error" : ""}" data-batch="${esc(section.anchor.id)}" aria-expanded="${open}" aria-controls="batch-events-${esc(section.anchor.id)}"><span class="disclosure-arrow">${open ? "▾" : "▸"}</span><span>${names.length ? names.length + " 个工具调用 · " + [...new Set(names)].map(esc).join("、") : "程序处理记录"}</span><small>${rest.length} 条事件${errors ? ` · ${errors} 次错误` : ""}</small></button><div id="batch-events-${esc(section.anchor.id)}" class="batch-events" ${open ? "" : "hidden"}>${rest.map(event => eventRow(event, related)).join("")}</div>`;
+            html += `<button id="batch-${esc(section.anchor.id)}" class="batch-summary ${errors ? "has-error" : ""}" data-batch="${esc(section.anchor.id)}" aria-expanded="${open}" aria-controls="batch-events-${esc(section.anchor.id)}"><span class="disclosure-arrow">${open ? "▾" : "▸"}</span><span>${names.length ? names.length + " 个工具调用 · " + [...new Set(names)].map(esc).join("、") : "Harness 处理记录"}</span><small>${rest.length} 条事件${errors ? ` · ${errors} 次错误` : ""}</small></button><div id="batch-events-${esc(section.anchor.id)}" class="batch-events" ${open ? "" : "hidden"}>${rest.map(event => eventRow(event, related)).join("")}</div>`;
             const forwarded = step?.calls.filter(call => call.nextModel) ?? [];
             if (forwarded.length)
                 html += `<button class="stream-receipt-link" data-event="${esc(forwarded[0].nextModel.id)}" data-part="/input/messages">↳ ${forwarded.length} 条回执已进入请求 ${forwarded[0].nextModel.turn} · 查看消息依据</button>`;

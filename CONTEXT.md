@@ -12,6 +12,18 @@ _Avoid_: Trace display alone, code-writing quota, generic framework showcase
 One submitted task and its bounded execution, including model requests, tool calls, and its stopping outcome.
 _Avoid_: A guaranteed successful task, an entire user's history
 
+**Harness**:
+The runtime surrounding the model that prepares context, routes tool calls, returns tool results, enforces execution limits, and records what happened. A Harness control event is one observable action of that runtime, not its full set of responsibilities.
+_Avoid_: The model itself, a model message role, tool dispatch alone
+
+**Model Round**:
+One model request and the tool processing it initiates before the next model request or the end of the run. Several tool calls proposed together belong to the same model round; a request with no tool calls is also a model round.
+_Avoid_: User conversation turn, one round per tool call, a completed user task
+
+**Conversation Turn**:
+One user request and the Agent's work toward responding to it, potentially spanning several model rounds.
+_Avoid_: One model request, one tool call
+
 **Trace Event**:
 A recorded action or control decision with its actual inputs, outputs, timing, and related code.
 _Avoid_: Reconstructed model reasoning, fabricated evidence
