@@ -221,13 +221,71 @@ def run_task(run: dict, model_client: object, workspace: Path, output: Path, loc
         (output / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def validate_history(run: dict, directory_id: str) -> None:
+    """Validate the fields the trace UI consumes before loading a local snapshot."""
+    json.dumps(run, allow_nan=False)
+    strings = ("id", "task", "model", "workspace", "status", "answer", "task_result")
+    if not all(isinstance(run[key], str) for key in strings):
+        raise ValueError("invalid_metadata")
+    if run["id"] != directory_id or not re.fullmatch(r"[a-f0-9]{32}", run["id"]):
+        raise ValueError("invalid_identity")
+    if run["status"] not in {"completed", "failed", "budget_exhausted"}:
+        raise ValueError("not_finished")
+    for key in ("created_at", "duration"):
+        if type(run.get(key)) not in (int, float) or run[key] < 0:
+            raise ValueError("invalid_time")
+    for key in ("model_requests", "tool_calls", "tool_errors"):
+        if type(run[key]) is not int or run[key] < 0:
+            raise ValueError("invalid_count")
+    if not isinstance(run["events"], list) or not run["events"] or not isinstance(run["source"], dict):
+        raise ValueError("invalid_trace")
+    ids = set()
+    for event in run["events"]:
+        if not all(isinstance(event[key], str) for key in ("id", "title", "explanation", "code")):
+            raise ValueError("invalid_event")
+        if not re.fullmatch(r"e\d+", event["id"]) or event["id"] in ids or event["kind"] not in {"input", "model", "tool", "control"}:
+            raise ValueError("invalid_event_identity")
+        ids.add(event["id"])
+        if event["status"] not in {"succeeded", "failed"}:
+            raise ValueError("unfinished_event")
+        if type(event["turn"]) is not int or event["turn"] < 0:
+            raise ValueError("invalid_turn")
+        if any(type(event[key]) not in (int, float) or event[key] < 0 for key in ("t", "d")):
+            raise ValueError("invalid_event_time")
+        if not isinstance(event["input"], dict) or not isinstance(event["output"], dict):
+            raise ValueError("invalid_event_payload")
+        source = run["source"][event["code"]]
+        if not all(isinstance(source[key], str) for key in ("path", "code")) or type(source["line"]) is not int or source["line"] < 1:
+            raise ValueError("invalid_source")
+
+
+def load_recent_runs(output: Path) -> tuple[dict, list[str]]:
+    """Read the last eight finished runs; never execute or rewrite historical actions."""
+    latest, skipped = [], []
+    # ponytail: scan local records once at startup; add a metadata index if history becomes large.
+    for path in output.glob("*/run.json"):
+        try:
+            if path.is_symlink() or path.parent.is_symlink():
+                raise ValueError("linked_record")
+            run = json.loads(path.read_text(encoding="utf-8"))
+            validate_history(run, path.parent.name)
+        except (OSError, ValueError, TypeError, KeyError):
+            skipped.append(path.parent.name)
+            continue
+        latest.append(run)
+        latest.sort(key=lambda item: (item["created_at"], item["id"]))
+        del latest[:-8]
+    return {run["id"]: run for run in latest}, skipped
+
+
 def make_server(workspace: Path, port: int, client_factory=connection.make_client, output: Path | None = None):
     workspace = workspace.resolve()
     if not workspace.is_dir():
         raise ValueError("工作区必须是存在的目录")
     output = output or ROOT / ".agent_state/runs"
     lock = threading.Lock()
-    runs = {}
+    runs, skipped = load_recent_runs(output)
+    history = {"loaded": len(runs), "skipped": len(skipped)}
     token = secrets.token_urlsafe(32)
     # ponytail: one active run for this local learning tool; introduce a queue only if needed.
     active = threading.Lock()
@@ -272,7 +330,7 @@ def make_server(workspace: Path, port: int, client_factory=connection.make_clien
                 self.respond(200, {
                     "workspace": str(workspace), "model": os.getenv("OPENAI_MODEL", ""),
                     "configured": bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL")),
-                    "token": token, "default_task": DEFAULT_TASK,
+                    "token": token, "default_task": DEFAULT_TASK, "history": history,
                 })
             elif path == "/api/runs":
                 with lock:
@@ -282,7 +340,7 @@ def make_server(workspace: Path, port: int, client_factory=connection.make_clien
             elif re.fullmatch(r"/api/runs/[a-f0-9]{32}", path):
                 with lock:
                     run = copy.deepcopy(runs.get(path.rsplit("/", 1)[1]))
-                self.respond(200 if run else 404, run or {"error": "运行记录不存在；重启后的历史可从本地 run.json 查看"})
+                self.respond(200 if run else 404, run or {"error": "记录未在最近八次有效运行中；原始文件仍保留在本地"})
             elif path == "/favicon.ico":
                 self.respond(204, b"")
             else:

@@ -183,7 +183,53 @@ def main():
             server.shutdown()
             server.server_close()
             thread.join(timeout=3)
-    print("lab checks passed: trace evidence, batch receipts, budget, truncation, read-only scope, same-origin HTTP")
+
+        # Restart against saved files. Browsing must not construct a model client or replay tools.
+        saved = copy.deepcopy(result)
+        history_dir = root / "http-runs"
+        for i in range(1, 10):
+            older = {**saved, "id": f"{i:032x}", "created_at": i}
+            path = history_dir / older["id"] / "run.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps(older))
+        corrupt = history_dir / ("a" * 32) / "run.json"
+        corrupt.parent.mkdir()
+        corrupt.write_text('{"incomplete":')
+        unfinished = {**saved, "id": "b" * 32, "status": "running"}
+        path = history_dir / unfinished["id"] / "run.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps(unfinished))
+        linked = history_dir / ("c" * 32) / "run.json"
+        linked.parent.mkdir()
+        linked.symlink_to(outside)
+        invalid = copy.deepcopy(saved)
+        invalid["id"] = "d" * 32
+        invalid["events"][0]["id"] = '<img src=x onerror="alert(1)">'
+        path = history_dir / invalid["id"] / "run.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps(invalid))
+        history_before = {p: p.read_bytes() for p in history_dir.glob("*/run.json")}
+
+        def forbidden_factory():
+            raise AssertionError("Reading history must not call the model factory")
+
+        server = lab.make_server(workspace, 0, forbidden_factory, history_dir)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, config = request("GET", "/api/config")
+            assert config["history"] == {"loaded": 8, "skipped": 4}
+            status, items = request("GET", "/api/runs")
+            assert [r["id"] for r in items] == [saved["id"]] + [f"{i:032x}" for i in range(9, 2, -1)]
+            status, restored = request("GET", "/api/runs/" + saved["id"])
+            assert status == 200 and restored == saved
+            assert request("GET", "/api/runs/" + f"{1:032x}")[0] == 404
+            assert {p: p.read_bytes() for p in history_dir.glob("*/run.json")} == history_before
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+    print("lab checks passed: trace evidence, batch receipts, budget, truncation, read-only scope, same-origin HTTP, history restart")
 
 
 if __name__ == "__main__":

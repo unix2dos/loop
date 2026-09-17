@@ -16,6 +16,10 @@ _Avoid_: A guaranteed successful task, an entire user's history
 A recorded action or control decision with its actual inputs, outputs, timing, and related code.
 _Avoid_: Reconstructed model reasoning, fabricated evidence
 
+**Historical Run**:
+A preserved record of an ended run, inspected using the evidence and code captured at that time. Viewing it does not execute actions or continue the original task.
+_Avoid_: Live task, automatic recovery, current workspace state
+
 **Task Acceptance**:
 A judgment about whether the delivered result satisfies the user's task, based on evidence beyond the runtime stopping normally.
 _Avoid_: Model self-report, run completion alone
