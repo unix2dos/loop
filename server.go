@@ -24,6 +24,7 @@ type Server struct {
 	mu                      sync.Mutex
 	workspace, state, token string
 	runs                    map[string]*Run
+	history                 map[string]RunSummary
 	sources                 map[string]Source
 	buildID                 string
 	tools                   []Tool
@@ -54,7 +55,7 @@ func NewServer(workspace, state string, factory CallerFactory) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
-	runs, skipped, err := loadHistory(state)
+	history, skipped, err := loadHistory(state)
 	if err != nil {
 		return nil, err
 	}
@@ -74,8 +75,8 @@ func NewServer(workspace, state string, factory CallerFactory) (*Server, error) 
 	if _, err := rand.Read(tokenBytes[:]); err != nil {
 		return nil, err
 	}
-	return &Server{workspace: workspace, state: state, token: hex.EncodeToString(tokenBytes[:]), runs: runs, sources: sources, buildID: buildID,
-		tools: tools, loaded: len(runs), skipped: skipped, factory: factory}, nil
+	return &Server{workspace: workspace, state: state, token: hex.EncodeToString(tokenBytes[:]), runs: map[string]*Run{}, history: history, sources: sources, buildID: buildID,
+		tools: tools, loaded: len(history), skipped: skipped, factory: factory}, nil
 }
 
 func (s *Server) newRun(task string, budget int, model string) (*Run, error) {
@@ -159,12 +160,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"token":      s.token, "default_task": defaultTask, "history": map[string]int{"loaded": s.loaded, "skipped": s.skipped}})
 		case "/api/runs":
 			s.mu.Lock()
-			ids := sortedRunIDs(s.runs)
-			items := make([]map[string]any, 0, len(ids))
-			for i := len(ids) - 1; i >= 0; i-- {
-				run := s.runs[ids[i]]
-				items = append(items, map[string]any{"id": run.ID, "task": run.Task, "status": run.Status, "created_at": run.CreatedAt, "model": run.Model})
+			for id, run := range s.runs {
+				s.history[id] = summarizeRun(run)
 			}
+			items := sortedSummaries(s.history)
 			s.mu.Unlock()
 			respond(w, 200, items)
 		default:
@@ -178,8 +177,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			raw, err := json.Marshal(run)
 			s.mu.Unlock()
 			if run == nil {
-				respond(w, 404, map[string]any{"error": "记录未在最近八次有效运行中；原始文件仍保留在本地"})
-				return
+				stored, readErr := readStoredRun(s.state, id)
+				if readErr != nil {
+					respond(w, 404, map[string]any{"error": "运行记录不存在、尚未保存或格式无效"})
+					return
+				}
+				raw, err = json.Marshal(stored)
 			}
 			if err != nil {
 				respond(w, 500, map[string]any{"error": "无法读取记录"})
@@ -243,8 +246,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	run.Model = model
 	s.active = true
 	s.runs[run.ID] = run
+	s.history[run.ID] = summarizeRun(run)
 	for len(s.runs) > 8 {
-		delete(s.runs, sortedRunIDs(s.runs)[0])
+		for _, id := range sortedRunIDs(s.runs) {
+			if id != run.ID {
+				delete(s.runs, id)
+				break
+			}
+		}
 	}
 	s.mu.Unlock()
 	go func() {
@@ -256,6 +265,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			run.Status = "failed"
 			run.Error = map[string]any{"error_type": "StorageError", "message": "本地记录或执行异常"}
 		}
+		s.history[run.ID] = summarizeRun(run)
 		s.active = false
 	}()
 	respond(w, 202, map[string]any{"id": run.ID})

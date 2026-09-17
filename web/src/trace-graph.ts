@@ -80,3 +80,21 @@ export function relatedEvents(graph: TraceGraph, selected: string | null): Set<s
   }
   return related;
 }
+
+export interface TokenUsage { input?: number; output?: number; total?: number; cached?: number }
+const tokenNumber = (value: unknown): number | undefined => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+export function tokenUsage(event: TraceEvent): TokenUsage {
+  const usage = object(event.output?.usage);
+  return { input: tokenNumber(usage.prompt_tokens), output: tokenNumber(usage.completion_tokens), total: tokenNumber(usage.total_tokens), cached: tokenNumber(object(usage.prompt_tokens_details).cached_tokens) };
+}
+export function runUsage(run: Run): { models: number; input: { total?: number; count: number }; output: { total?: number; count: number }; total: { total?: number; count: number }; cached: { total?: number; count: number } } {
+  const values = run.events.filter(event => event.kind === "model").map(tokenUsage);
+  const sum = (field: keyof TokenUsage): { total?: number; count: number } => {
+    const known = values.map(value => value[field]).filter((n): n is number => n !== undefined);
+    return { total: known.length ? known.reduce((total, value) => total + value, 0) : undefined, count: known.length };
+  };
+  return { models: values.length, input: sum("input"), output: sum("output"), total: sum("total"), cached: sum("cached") };
+}
+export function formatDuration(seconds: number): string {
+  return seconds < 1 ? (seconds * 1000).toFixed(1) + " ms" : seconds.toFixed(2) + " s";
+}

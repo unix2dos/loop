@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -359,4 +360,86 @@ func TestHTTPRunOutlivesSubmissionAndRejectsConcurrentRun(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("run did not finish")
+}
+
+func TestAllHistoryAndLazyDetail(t *testing.T) {
+	dir, state := workspace(t), t.TempDir()
+	app, err := NewServer(dir, state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	example := cases(t)[0]
+	run, _ := app.newRun("history example", 4, "scripted")
+	var requests []ModelRequest
+	if err := RunTask(context.Background(), run, scripted(example.Responses, &requests), app.tools, filepath.Join(state, run.ID), &app.mu); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 11; i++ {
+		copy := *run
+		copy.ID, copy.CreatedAt = fmt.Sprintf("%032x", i), float64(i)
+		if err := os.MkdirAll(filepath.Join(state, copy.ID), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveRun(filepath.Join(state, copy.ID, "run.json"), &copy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app, err = NewServer(dir, state, func(string) (ModelCaller, string, error) {
+		t.Fatal("viewing history called model factory")
+		return nil, "", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.history) != 12 || len(app.runs) != 0 {
+		t.Fatal("history should index all summaries without retaining every trace")
+	}
+	server := httptest.NewServer(app)
+	defer server.Close()
+	response, err := http.Get(server.URL + "/api/runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summaries []RunSummary
+	err = json.NewDecoder(response.Body).Decode(&summaries)
+	response.Body.Close()
+	if err != nil || len(summaries) != 12 {
+		t.Fatal("history listing still limited", err, len(summaries))
+	}
+	oldest := fmt.Sprintf("%032x", 1)
+	path := filepath.Join(state, oldest, "run.json")
+	before, _ := os.ReadFile(path)
+	response, err = http.Get(server.URL + "/api/runs/" + oldest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detail Run
+	err = json.NewDecoder(response.Body).Decode(&detail)
+	response.Body.Close()
+	if err != nil || response.StatusCode != 200 || detail.ID != oldest || detail.Answer != run.Answer {
+		t.Fatal("old detail is not readable", err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(before) != string(after) {
+		t.Fatal("viewing history rewrote its record")
+	}
+	if _, err := readStoredRun(state, "../escape"); err == nil {
+		t.Fatal("invalid run ID allowed")
+	}
+	linked := fmt.Sprintf("%032x", 20)
+	if err := os.Symlink(filepath.Join(state, oldest), filepath.Join(state, linked)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readStoredRun(state, linked); err == nil {
+		t.Fatal("linked run directory allowed")
+	}
+	if err := os.Rename(path, path+".original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(path+".original", path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readStoredRun(state, oldest); err == nil {
+		t.Fatal("linked run file allowed")
+	}
 }

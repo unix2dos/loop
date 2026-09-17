@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildTraceGraph, relatedEvents, sameJSON } from '../web/dist/trace-graph.js';
+import { buildTraceGraph, relatedEvents, sameJSON, tokenUsage, runUsage, formatDuration } from '../web/dist/trace-graph.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../testdata/loop-cases.json', import.meta.url), 'utf8'))[0];
 const clone = value => structuredClone(value);
@@ -76,4 +76,22 @@ check('匹配 JSON 不依赖键顺序，但不能混淆类型', () => {
   assert.ok(sameJSON({ a: 1, b: [2] }, { b: [2], a: 1 }));
   assert.ok(!sameJSON({ a: 1 }, { a: '1' }));
 });
-console.log(`${passed} trace relationship checks passed`);
+check('累计 token 使用真实值，缓存不重复计入合计', () => {
+ const run = example();
+ run.events[0].output.usage = {prompt_tokens:497,completion_tokens:83,total_tokens:580,prompt_tokens_details:{cached_tokens:0}};
+ run.events.at(-1).output.usage = {prompt_tokens:1470,completion_tokens:430,total_tokens:1900,prompt_tokens_details:{cached_tokens:512}};
+ const result=runUsage(run);
+ assert.equal(result.input.total,1967); assert.equal(result.output.total,513);
+ assert.equal(result.total.total,2480); assert.equal(result.cached.total,512); assert.equal(result.total.count,2);
+});
+check('未返回或非法 token 不当成零，部分统计保留覆盖数', () => {
+ const run=example();
+ run.events[0].output.usage={prompt_tokens:null,completion_tokens:-1,total_tokens:'580'};
+ assert.equal(tokenUsage(run.events[0]).total,undefined);
+ assert.equal(tokenUsage({output:{usage:{total_tokens:.5}}}).total,undefined);
+ assert.equal(runUsage(run).total.total,undefined);
+ run.events.at(-1).output.usage={total_tokens:0};
+ const result=runUsage(run); assert.equal(result.total.total,0); assert.equal(result.total.count,1); assert.equal(result.models,2);
+});
+check('短工具耗时显示为毫秒',()=>{assert.equal(formatDuration(.0043),'4.3 ms');assert.equal(formatDuration(1.61),'1.61 s')});
+console.log(`${passed} trace and usage checks passed`);

@@ -74,3 +74,19 @@ export function relatedEvents(graph, selected) {
         }
     return related;
 }
+const tokenNumber = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+export function tokenUsage(event) {
+    const usage = object(event.output?.usage);
+    return { input: tokenNumber(usage.prompt_tokens), output: tokenNumber(usage.completion_tokens), total: tokenNumber(usage.total_tokens), cached: tokenNumber(object(usage.prompt_tokens_details).cached_tokens) };
+}
+export function runUsage(run) {
+    const values = run.events.filter(event => event.kind === "model").map(tokenUsage);
+    const sum = (field) => {
+        const known = values.map(value => value[field]).filter((n) => n !== undefined);
+        return { total: known.length ? known.reduce((total, value) => total + value, 0) : undefined, count: known.length };
+    };
+    return { models: values.length, input: sum("input"), output: sum("output"), total: sum("total"), cached: sum("cached") };
+}
+export function formatDuration(seconds) {
+    return seconds < 1 ? (seconds * 1000).toFixed(1) + " ms" : seconds.toFixed(2) + " s";
+}

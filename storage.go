@@ -59,6 +59,32 @@ type Run struct {
 	BuildID       string            `json:"build_id,omitempty"`
 }
 
+type RunSummary struct {
+	ID        string  `json:"id"`
+	Task      string  `json:"task"`
+	Model     string  `json:"model"`
+	Status    string  `json:"status"`
+	CreatedAt float64 `json:"created_at"`
+}
+
+func summarizeRun(run *Run) RunSummary {
+	return RunSummary{ID: run.ID, Task: run.Task, Model: run.Model, Status: run.Status, CreatedAt: run.CreatedAt}
+}
+
+func sortedSummaries(history map[string]RunSummary) []RunSummary {
+	items := make([]RunSummary, 0, len(history))
+	for _, summary := range history {
+		items = append(items, summary)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt == items[j].CreatedAt {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].CreatedAt > items[j].CreatedAt
+	})
+	return items
+}
+
 func appendJSON(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
@@ -228,41 +254,54 @@ func sortedRunIDs(runs map[string]*Run) []string {
 	return ids
 }
 
-func loadHistory(directory string) (map[string]*Run, int, error) {
-	runs := map[string]*Run{}
+func readStoredRun(directory, id string) (*Run, error) {
+	if !runIDPattern.MatchString(id) {
+		return nil, errors.New("invalid run id")
+	}
+	folder := filepath.Join(directory, id)
+	info, err := os.Lstat(folder)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("ordinary run directory required")
+	}
+	path := filepath.Join(folder, "run.json")
+	info, err = os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("ordinary run file required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return decodeHistory(raw, id)
+}
+
+func loadHistory(directory string) (map[string]RunSummary, int, error) {
+	history := map[string]RunSummary{}
 	skipped := 0
 	entries, err := os.ReadDir(directory)
 	if os.IsNotExist(err) {
-		return runs, 0, nil
+		return history, 0, nil
 	}
 	if err != nil {
 		return nil, 0, err
 	}
-	// ponytail: scan local records at startup; index metadata if the archive grows large.
+	// ponytail: validate files once at startup and retain only summaries; add a persistent index if scanning becomes slow.
 	for _, entry := range entries {
-		path := filepath.Join(directory, entry.Name(), "run.json")
-		info, statErr := os.Lstat(path)
-		if os.IsNotExist(statErr) {
+		run, readErr := readStoredRun(directory, entry.Name())
+		if os.IsNotExist(readErr) {
 			continue
 		}
-		if statErr != nil || entry.Type()&os.ModeSymlink != 0 || info.Mode()&os.ModeSymlink != 0 {
-			skipped++
-			continue
-		}
-		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
 			skipped++
 			continue
 		}
-		run, decodeErr := decodeHistory(raw, entry.Name())
-		if decodeErr != nil {
-			skipped++
-			continue
-		}
-		runs[run.ID] = run
-		if len(runs) > 8 {
-			delete(runs, sortedRunIDs(runs)[0])
-		}
+		history[run.ID] = summarizeRun(run)
 	}
-	return runs, skipped, nil
+	return history, skipped, nil
 }
