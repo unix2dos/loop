@@ -200,6 +200,12 @@ func TestHistoryAndHTTP(t *testing.T) {
 	}
 	var config map[string]any
 	_ = json.Unmarshal(raw, &config)
+	if config["state_dir"] != server.state {
+		t.Fatal("evidence directory mismatch")
+	}
+	if status, raw := get("/trace-graph.js", "", ""); status != 200 || len(raw) == 0 {
+		t.Fatal("trace graph module unavailable")
+	}
 	history := config["history"].(map[string]any)
 	if history["loaded"] != float64(1) || history["skipped"] != float64(1) {
 		t.Fatal(history)

@@ -146,15 +146,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeResponse(w, 200, raw, "text/html; charset=utf-8")
 		case "/favicon.ico":
 			writeResponse(w, 204, nil, "image/x-icon")
-		case "/app.js":
-			raw, err := assets.ReadFile("web/dist/app.js")
+		case "/app.js", "/trace-graph.js":
+			raw, err := assets.ReadFile("web/dist/" + strings.TrimPrefix(r.URL.Path, "/"))
 			if err != nil {
 				respond(w, 500, map[string]any{"error": "界面脚本不可用"})
 				return
 			}
 			writeResponse(w, 200, raw, "text/javascript; charset=utf-8")
 		case "/api/config":
-			respond(w, 200, map[string]any{"workspace": s.workspace, "model": os.Getenv("OPENAI_MODEL"),
+			respond(w, 200, map[string]any{"workspace": s.workspace, "state_dir": s.state, "model": os.Getenv("OPENAI_MODEL"),
 				"configured": os.Getenv("OPENAI_API_KEY") != "" && os.Getenv("OPENAI_MODEL") != "",
 				"token":      s.token, "default_task": defaultTask, "history": map[string]int{"loaded": s.loaded, "skipped": s.skipped}})
 		case "/api/runs":

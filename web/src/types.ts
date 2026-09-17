@@ -45,6 +45,7 @@ export interface Run extends RunSummary {
 }
 export interface Config {
   workspace: string;
+  state_dir: string;
   model: string;
   configured: boolean;
   token: string;
