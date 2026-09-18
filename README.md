@@ -47,40 +47,4 @@ go run .
 
 </details>
 
-## 第一个任务
-
-默认工作区是自带的 `workspace/`。点击「新任务」，请求上限保持为 **4**，粘贴：
-
-> 先列出工作区文件，再读取 agent-loop.md。用两句话说明工具结果怎样返回模型，并引用一处原文作为依据。
-
-点「开始任务」。通常会看到「请求模型 → 列出文件 → 再次请求模型 → 读取笔记 → 最终回答」。对照右侧轨迹核对引文。
-
-## 练习
-
-想先预测再看轨迹，用 [练习卡](docs/learning-labs.md)。
-
-## 启动失败
-
-| 现象 | 检查 |
-|---|---|
-| `go: command not found` | 安装 Go 1.24+，新开终端后运行 `go version` |
-| 页面提示「模型配置未就绪」 | 在启动服务的同一终端设置三个变量。只创建 `.env` 不会自动加载 |
-| `address already in use` | `go run . --port 8878`，打开对应地址 |
-| 程序提示工作区不存在 | 在仓库根目录启动，或用 `--workspace` 指定已有目录 |
-
-## 开发
-
-修改网页 TypeScript 时需要 Node/npm；只运行 Go 服务不需要。
-
-```sh
-npm ci
-npm run typecheck
-npm test
-go test -race ./...
-```
-
-## 许可证
-
-欢迎在 [Issues](https://github.com/unix2dos/loop/issues) 提交可复现的问题。报告时请删除凭证和私人材料。
-
 [MIT](LICENSE)
