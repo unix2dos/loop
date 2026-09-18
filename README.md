@@ -2,57 +2,83 @@
 
 **运行 Agent，看清每一步。**
 
-A local workbench for running an agent and inspecting every model request, tool call, and receipt.
+A local TypeScript coding agent workbench with real execution traces and source inspection.
 
-Loop 是使用 TypeScript 构建的本机 Coding Agent 工作台。你提交任务，它调用模型、列出文件、读取 Markdown，并把工具回执送回模型。网页里可以看到每一次请求、工具结果、耗时、停止原因，以及对应源码。
+在网页里提交任务，查看模型实际收到的消息、提出的工具调用，以及工具返回的结果。每一步都能展开原始记录和对应源码，便于排查错误、理解执行过程。
 
-普通对话可读取指定目录中的 Markdown。本机还提供一个 [TypeScript 修复练习](docs/coding-exercise.md)：授权后，Agent 在独立副本中改代码、运行容器内测试；你可以在轨迹中核对真实 diff、测试输出和退出码。
+Loop 使用 TypeScript 和 Node.js，在本机运行。模型请求发送到你配置的 API 服务，运行记录保存在本机。
 
-![一次运行的时间轴、事件和原始模型请求](docs/trace.png)
+![Loop 的执行轨迹、工具回执与原始记录](docs/trace.png)
 
-## 最短启动
+## 现在能做什么
 
-需要 Git 和 [Node.js 24.12+](https://nodejs.org/)。模型接口须兼容 OpenAI Chat Completions，并支持工具调用。
+- **读取笔记**：列出指定工作区的文件、读取 Markdown，在同一段对话中继续追问。
+- **修复一个 TS 程序**：在独立练习副本中修改代码，运行容器内测试，核对实际 diff、输出和退出码。
+- **检查执行过程**：按对话轮次查看模型请求、工具回执、耗时、API 返回的 token 用量和停止原因。
+- **回看证据**：查看保存的源码快照、导出运行 JSON，或在本地编辑器中打开记录。回看不会重新执行任务。
+
+目前是早期版本：普通对话只读 Markdown；代码修改和命令执行限于内置 TS 练习，同一时间运行一个任务。接入任意仓库和通用 Shell 尚未实现。
+
+## 启动
+
+需要 Git、[Node.js 24.12+](https://nodejs.org/) 和支持工具调用的 OpenAI Chat Completions 兼容 API。普通对话不需要 Docker。
 
 ```sh
 git clone https://github.com/unix2dos/loop.git
 cd loop
 npm ci
 npm run build
+```
+
+在同一个终端配置模型并启动。以下示例适用于 macOS / Linux 的 bash 或 zsh，请替换占位值：
+
+```sh
 export OPENAI_API_KEY='your-api-key'
 export OPENAI_MODEL='your-model-id'
 export OPENAI_BASE_URL='https://your-provider.example/v1'
 npm start
 ```
 
-浏览器打开 [http://127.0.0.1:8877/](http://127.0.0.1:8877/)。换成自己的目录时使用 `npm start -- --workspace '/absolute/path/to/notes'`。
+打开 **[http://127.0.0.1:8877/](http://127.0.0.1:8877/)**，保持启动终端运行。
 
-运行记录保存在 `~/.loop/ts-runs/`；原 Go/Python 版本的数据目录保留作归档，新版从空历史开始。运行中的源码快照与每次记录一同保存。开发检查运行 `npm test`。源码变更后重启服务，前端变更后先运行 `npm run build`。
-
-| 变量 | 填什么 |
+| 环境变量 | 用途 |
 |---|---|
-| `OPENAI_API_KEY` | 模型服务商的 API Key，不是网页登录密码 |
-| `OPENAI_MODEL` | 该接口的模型 ID |
-| `OPENAI_BASE_URL` | API 基础地址，不要带 `/chat/completions`。未设置时默认 `https://api.openai.com/v1` |
+| `OPENAI_API_KEY` | 模型服务商的 API Key |
+| `OPENAI_MODEL` | 该接口支持的模型 ID |
+| `OPENAI_BASE_URL` | API 基础地址，不带 `/chat/completions`；未设置时默认 `https://api.openai.com/v1` |
 
-变量名只表示接口格式，不限制厂商。当前只实现 Chat Completions，不能直接使用 Responses 或 Anthropic Messages 地址。
+这些变量名表示接口格式，不限制厂商。当前支持 Chat Completions，不支持直接使用 Responses 或 Anthropic Messages 地址。请求使用你自己的模型服务额度；Loop 不会自动读取 `.env`。
 
-<details>
-<summary>示例：OpenCode Go + GLM-5.3-Flash</summary>
+## 跑第一个任务
+
+点击“新任务”，使用自带的示例笔记：
+
+> 请调用 read_file 读取 agent-loop.md，引用一句原文说明工具回执如何进入下一次模型请求。路径相对于当前工作区。只读。
+
+打开右侧轨迹中的 `read_file`，对照工具输出和模型回答。随后在同一个输入框追问，可以检查下一轮请求如何携带已有消息。
+
+要读取自己的笔记目录：
 
 ```sh
-export OPENAI_API_KEY='your-opencode-go-api-key'
-export OPENAI_MODEL='glm-5.3-flash'
-export OPENAI_BASE_URL='https://opencode.ai/zen/go/v1'
-npm start
+npm start -- --workspace '/absolute/path/to/notes'
 ```
 
-模型 ID 和地址见 [OpenCode Go](https://opencode.ai/docs/go/#endpoints)。该组合已在本项目中完成真实工具调用验证。Loop 自己跑 Agent 循环；OpenCode Go 只提供模型 API。客户端会发送 User-Agent 和稳定会话 ID，符合其[接入要求](https://opencode.ai/docs/go/#where-can-i-use-it)。
+要试一次代码修复，先按[TS 修复练习说明](docs/coding-exercise.md)准备 Docker 和 Node 镜像，再选择“新任务 → 修复一个 TypeScript 程序”。授权后，Loop 只能修改练习中的 `average.ts`，测试在断网容器中执行。模型可能在预算内未完成任务，页面会保留真实结果。
 
-</details>
+运行记录默认保存在 `~/.loop/ts-runs/`。循环正常结束与测试通过，都需要结合实际结果判断任务是否完成。
 
-## 看一次代码修复
+## 开发与验证
 
-启动 Docker 并按 [练习说明](docs/coding-exercise.md) 准备 Node 镜像，然后在网页选择“新任务 → 修复一个 TypeScript 程序”。第一次先观察测试失败怎样交回模型，以及修改后的测试证据。普通对话不需要 Docker。
+```sh
+npm test             # 类型、运行行为、轨迹与会话检查
+npm run test:docker  # 需要已准备的 Docker 镜像；不调用真实模型
+```
 
-[MIT](LICENSE)
+修改前端后运行 `npm run build`。修改源码后重启服务，使执行代码、网页资源和源码快照保持一致。
+
+- [从 Agent 循环读起](src/agent.ts)：模型请求、工具执行和停止规则。
+- [三个观察实验](docs/learning-labs.md)：请求预算、错误回执与连续对话。
+- [TS 修复练习](docs/coding-exercise.md)：文件权限、容器边界与验收方式。
+- [迁移验收记录](docs/migration-typescript.md)：自动检查、真实模型验证及尚未通过的部分。
+
+[MIT License](LICENSE)
