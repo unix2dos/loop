@@ -1,4 +1,4 @@
-import { conversationID, conversationHeads, conversationOverview, traceKey } from "./conversation.js";
+import { conversationID, conversationHeads, conversationOverview, conversationTitle, shortTitle, traceKey } from "./conversation.js";
 import { buildTraceGraph, object, relatedEvents, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from "./trace-graph.js";
 function $(id) {
     const element = document.getElementById(id);
@@ -36,6 +36,46 @@ function savePreference(key, value) { try {
     localStorage.setItem(key, String(value));
 }
 catch { /* Browser storage is optional. */ } }
+function readBudget() {
+    try {
+        const n = Number(localStorage.getItem("loop.maxRequests"));
+        if (n >= 1 && n <= 8 && Number.isInteger(n))
+            return n;
+    }
+    catch { /* Browser storage is optional. */ }
+    return 4;
+}
+let maxRequests = readBudget(), settingsReturn = "home";
+let followLatest = true, followScrollLock = 0, renamingId = null;
+// ponytail: Conversation Title overrides stay in localStorage. Ceiling: another browser and run export will not see them. Upgrade: persist on the root Run.
+function loadTitles() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem("loop.conversationTitles") || "{}");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            return {};
+        const titles = {};
+        for (const [id, title] of Object.entries(parsed))
+            if (typeof title === "string")
+                titles[id] = title;
+        return titles;
+    }
+    catch {
+        return {};
+    }
+}
+function saveTitle(id, value, task) {
+    const titles = loadTitles(), next = value.replace(/\s+/g, " ").trim();
+    if (!next || next === shortTitle(task))
+        delete titles[id];
+    else
+        titles[id] = Array.from(next).slice(0, 40).join("");
+    try {
+        localStorage.setItem("loop.conversationTitles", JSON.stringify(titles));
+    }
+    catch { /* Browser storage is optional. */ }
+}
+function rootTask(item) { return items.find(root => root.id === conversationID(item))?.task ?? item.task; }
+function displayTitle(item) { return conversationTitle(rootTask(item), loadTitles()[conversationID(item)] ?? ""); }
 let conversationShare = .65;
 try {
     const saved = Number(localStorage.getItem("loop.conversationShare"));
@@ -168,10 +208,11 @@ function applyLayout() {
     $("trace-toggle").setAttribute("aria-expanded", String(!traceCollapsed));
     $("trace-summary").setAttribute("aria-expanded", String(!traceCollapsed));
     $("task-home").hidden = page !== "home";
-    $("workbench").hidden = page === "home";
+    $("settings").hidden = page !== "settings";
+    $("workbench").hidden = page === "home" || page === "settings";
     updateSplitWidth();
 }
-function updateURL(id, fresh = false) {
+function updateURL(id, fresh = false, settings = false) {
     const url = new URL(location.href);
     url.search = "";
     url.hash = "";
@@ -179,6 +220,8 @@ function updateURL(id, fresh = false) {
         url.searchParams.set("run", id);
     else if (fresh)
         url.searchParams.set("new", "1");
+    else if (settings)
+        url.searchParams.set("settings", "1");
     if (url.href !== location.href)
         window.history.pushState(null, "", url);
 }
@@ -197,6 +240,7 @@ function resetRunView() {
     detailOpen = false;
     graph = { steps: [], unlinkedTools: [] };
     $("download").disabled = true;
+    $("follow-latest").hidden = true;
     window.clearTimeout(pollTimer);
     document.querySelector(".trace-pane")?.classList.remove("detail-open");
     setHTML("detail-heading", '<h2>选择一个步骤查看原始记录</h2>');
@@ -217,12 +261,53 @@ function resetRunView() {
 function renderTaskLists() {
     const heads = conversationHeads(items);
     const rootID = run ? conversationID(run) : items.find(item => item.id === activeId)?.conversation_id || activeId;
-    const taskTitle = (item) => items.find(root => root.id === conversationID(item))?.task ?? item.task;
     const date = (item) => new Date(item.created_at * 1000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-    setHTML("task-list", heads.map(item => `<button id="task-${esc(item.id)}" class="task-item ${rootID === conversationID(item) ? "active" : ""}" data-run="${esc(item.id)}" aria-current="${rootID === conversationID(item)}" title="${esc(taskTitle(item))}"><strong>${esc(taskTitle(item).slice(0, 100))}</strong><span><i class="task-dot ${esc(item.status)}"></i>${esc(statuses[item.status])}<time>${date(item)}</time></span></button>`).join("") || '<p class="list-empty">尚无任务记录</p>');
-    setHTML("home-task-list", heads.map(item => `<button id="home-task-${esc(item.id)}" class="home-task" data-run="${esc(item.id)}"><span><strong>${esc(taskTitle(item).slice(0, 140))}</strong><small>${esc(item.model)} · ${esc(item.id.slice(0, 8))}</small></span><span class="task-state ${esc(item.status)}">${esc(statuses[item.status])}</span><time>${date(item)}</time><span aria-hidden="true">↗</span></button>`).join("") || '<div class="home-empty"><h2>从一个小任务开始</h2><p>提交一个只读任务，模型请求和工具回执会一起保存在本地。</p><button class="primary" data-new-task>创建第一个任务 →</button></div>');
+    const editing = renamingId !== null && document.activeElement instanceof HTMLInputElement && document.activeElement.id === "task-title-input";
+    if (!editing) {
+        setHTML("task-list", heads.map(item => {
+            const id = conversationID(item), label = displayTitle(item), active = rootID === id;
+            if (id === renamingId)
+                return `<div class="task-item ${active ? "active" : ""} renaming"><input id="task-title-input" class="task-title-input" value="${esc(label)}" maxlength="40" aria-label="对话标题"><span><i class="task-dot ${esc(item.status)}"></i><time>${date(item)}</time></span></div>`;
+            return `<div class="task-item ${active ? "active" : ""}"><button type="button" id="task-${esc(item.id)}" class="task-open" data-run="${esc(item.id)}"${active ? ' aria-current="true"' : ""} title="${esc(rootTask(item))}"><strong>${esc(label)}</strong><span><i class="task-dot ${esc(item.status)}"></i><time>${date(item)}</time></span></button><button type="button" class="task-rename" data-rename="${esc(id)}" title="改名">改名</button></div>`;
+        }).join("") || '<p class="list-empty">尚无任务记录</p>');
+    }
+    setHTML("home-task-list", heads.map(item => `<button id="home-task-${esc(item.id)}" class="home-task" data-run="${esc(item.id)}"><span><strong>${esc(displayTitle(item))}</strong><small>${esc(item.model)} · ${esc(item.id.slice(0, 8))}</small></span><span class="task-state ${esc(item.status)}">${esc(statuses[item.status])}</span><time>${date(item)}</time><span aria-hidden="true">↗</span></button>`).join("") || '<div class="home-empty"><h2>从一个小任务开始</h2><p>提交一个只读任务，模型请求和工具回执会一起保存在本地。</p><button class="primary" data-new-task>创建第一个任务 →</button></div>');
     $("task-count").textContent = `${heads.length} 段对话`;
     $("home-count").textContent = `${heads.length} 段对话 · ${items.length} 轮运行`;
+}
+function finishRename(id, value) {
+    if (renamingId !== id)
+        return;
+    renamingId = null;
+    const item = items.find(entry => conversationID(entry) === id);
+    if (value !== null && item)
+        saveTitle(id, value, rootTask(item));
+    renderTaskLists();
+    if (run && conversationID(run) === id) {
+        const task = conversation[0]?.task ?? run.task;
+        $("conversation-title").textContent = conversationTitle(task, loadTitles()[id] ?? "");
+        $("conversation-title").title = task;
+    }
+}
+function startRename(id) {
+    renamingId = id;
+    renderTaskLists();
+    const input = document.getElementById("task-title-input");
+    if (!(input instanceof HTMLInputElement))
+        return;
+    input.focus();
+    input.select();
+    input.onkeydown = event => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            finishRename(id, input.value);
+        }
+        if (event.key === "Escape") {
+            event.preventDefault();
+            finishRename(id, null);
+        }
+    };
+    input.onblur = () => finishRename(id, input.value);
 }
 async function showHome(changeURL = true) {
     page = "home";
@@ -243,7 +328,7 @@ function showNewTask(changeURL = true) {
     applyLayout();
     renderTaskLists();
     $("conversation-title").textContent = "新任务";
-    setHTML("conversation", '<div class="welcome"><span class="eyebrow">运行与观察</span><h3>从一个问题开始。</h3><p>输入任务，阅读回答。需要观察过程时，在右侧查看模型请求、工具与回执。</p><button class="example-button" data-example="先列出工作区文件，再读取 agent-loop.md。用两句话说明工具结果怎样返回模型，并引用一处原文作为依据。">使用示例笔记 →</button></div>');
+    setHTML("conversation", '<div class="welcome"><span class="eyebrow">运行与观察</span><h3>从一个问题开始。</h3><p>输入任务，阅读回答。需要观察过程时，在右侧查看模型请求、工具与回执。</p></div>');
     setHTML("graph", '<div class="empty-graph"><p>还没有执行记录。<br>提交任务后，过程会在这里出现。</p></div>');
     if (!config?.configured)
         showError("请先在服务端配置模型，然后重启。");
@@ -251,6 +336,27 @@ function showNewTask(changeURL = true) {
     $("task").focus();
     render();
     void pollTaskList();
+}
+function showSettings(changeURL = true) {
+    if (page !== "settings")
+        settingsReturn = page;
+    page = "settings";
+    if (changeURL)
+        updateURL(null, false, true);
+    applyLayout();
+    $("budget").value = String(maxRequests);
+}
+function leaveSettings() {
+    if (settingsReturn === "run" && activeId && run) {
+        page = "run";
+        applyLayout();
+        render();
+        updateURL(activeId);
+    }
+    else if (settingsReturn === "new")
+        showNewTask();
+    else
+        void showHome();
 }
 async function pollTaskList() {
     try {
@@ -274,6 +380,8 @@ async function routeFromLocation() {
         await chooseRun(params.get("run") ?? "", false);
     else if (params.get("new") === "1")
         showNewTask(false);
+    else if (params.get("settings") === "1")
+        showSettings(false);
     else
         await showHome(false);
 }
@@ -516,20 +624,19 @@ function render() {
         return;
     $("submit").disabled = busy || !config.configured || (page === "run" && !conversationReady);
     $("submit").textContent = busy ? "正在运行…" : page === "run" ? "发送追问 →" : "开始任务 →";
-    $("composer-label").textContent = page === "run" ? "继续对话" : "新任务";
-    $("task").placeholder = page === "run" ? "继续提问，Loop 会结合前面的对话回答。" : "让 Agent 阅读笔记，带着原文回答一个问题。";
-    $("composer-hint").textContent = page === "run" ? "携带完整对话记录" : "开始一段新对话";
-    $("composer-note").textContent = page === "run" ? "追问继续当前对话。右侧可回看每一轮的执行轨迹。" : "首次发送后可继续追问；左侧新任务用于另起对话。";
-    if (!run)
+    if (!run) {
+        $("follow-latest").hidden = true;
         return;
+    }
     const current = run;
-    const taskTitle = conversation[0]?.task ?? current.task;
-    $("conversation-title").textContent = taskTitle;
-    $("conversation-title").title = taskTitle;
+    const task = conversation[0]?.task ?? current.task;
+    const heading = conversationTitle(task, loadTitles()[conversationID(current)] ?? "");
+    $("conversation-title").textContent = heading;
+    $("conversation-title").title = task;
     $("trace-title").textContent = "执行轨迹 · 整段对话";
     const head = conversation.at(-1) ?? current;
     const previous = selectedRunID + ":" + selected;
-    if ($("follow").checked && head.status === "running") {
+    if (followLatest && head.status === "running") {
         selectedRunID = head.id;
         selected = head.events.at(-1)?.id ?? null;
     }
@@ -541,7 +648,7 @@ function render() {
     if (selectedRunID + ":" + selected !== previous) {
         pointerPart = "";
         recordFeedback = "";
-        if ($("follow").checked && selected) {
+        if (followLatest && selected) {
             turnStates.set(detail.id, true);
             const section = executionSections(detail).find(section => section.events.some(event => event.id === selected));
             if (section?.kind === "request")
@@ -561,11 +668,15 @@ function render() {
     $("metrics").title = `累计执行耗时，不含轮间等待。输入 ${number(usage.input.total)} · 输出 ${number(usage.output.total)} · 缓存输入 ${number(usage.cached.total)}（输入子项，不重复计入）`;
     $("download").disabled = false;
     $("download").textContent = conversation.length > 1 ? "导出对话 ↓" : "导出 ↓";
+    $("follow-latest").hidden = head.status !== "running" || followLatest;
     renderConversation();
     renderGraph();
     renderDetail(detail);
-    if ($("follow").checked && head.status === "running" && previous !== selectedRunID + ":" + selected)
-        document.getElementById(nodeID(detail.id, selected ?? ""))?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (followLatest && head.status === "running" && previous !== selectedRunID + ":" + selected && selected) {
+        followScrollLock += 1;
+        document.getElementById(nodeID(detail.id, selected))?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        window.setTimeout(() => { followScrollLock = Math.max(0, followScrollLock - 1); }, 150);
+    }
 }
 async function refreshHistory() {
     items = await api("/api/runs");
@@ -583,7 +694,7 @@ async function poll() {
         if (activeId !== id)
             return;
         if (!run)
-            $("follow").checked = snapshot.status === "running";
+            followLatest = snapshot.status === "running";
         run = snapshot;
         await refreshHistory();
         const chain = await loadConversation(snapshot);
@@ -616,6 +727,7 @@ async function chooseRun(id, changeURL = true) {
     conversationReady = false;
     selectedRunID = id;
     turnStates.set(id, true);
+    followLatest = true;
     const target = items.find(item => item.id === id);
     if (!run || !target || conversationID(run) !== conversationID(target)) {
         conversation = [];
@@ -658,7 +770,7 @@ function selectEvent(id, part = "", detail, runID = selectedRunID ?? run?.id) {
     const section = executionSections(current).find(section => section.events.some(event => event.id === id));
     if (section?.kind === "request")
         batchStates.set(traceKey(current.id, section.anchor.id), true);
-    $("follow").checked = false;
+    followLatest = false;
     detailTab = detail === "overview" || detail === "code" ? detail : "io";
     if (traceCollapsed) {
         traceCollapsed = false;
@@ -679,7 +791,7 @@ function focusTurn(id) {
     selected = current.events.find(event => event.kind === "model")?.id ?? current.events[0]?.id ?? null;
     pointerPart = "";
     recordFeedback = "";
-    $("follow").checked = false;
+    followLatest = false;
     if (traceCollapsed) {
         traceCollapsed = false;
         savePreference("loop.traceCollapsed", false);
@@ -716,6 +828,21 @@ async function openRecord() {
 document.addEventListener("click", event => {
     if (!(event.target instanceof Element))
         return;
+    const rename = event.target.closest("[data-rename]")?.dataset.rename;
+    if (rename) {
+        startRename(rename);
+        return;
+    }
+    if (event.target.closest("#follow-latest")) {
+        followLatest = true;
+        const head = conversation.at(-1);
+        if (head) {
+            selectedRunID = head.id;
+            selected = head.events.at(-1)?.id ?? null;
+        }
+        render();
+        return;
+    }
     const batch = event.target.closest("[data-batch]")?.dataset.batch;
     if (batch) {
         const ownerID = event.target.closest("[data-batch]")?.dataset.traceRun;
@@ -766,6 +893,14 @@ document.addEventListener("click", event => {
         showNewTask();
         return;
     }
+    if (event.target.closest("[data-settings]")) {
+        showSettings();
+        return;
+    }
+    if (event.target.closest("[data-leave-settings]")) {
+        leaveSettings();
+        return;
+    }
     if (event.target.closest("[data-toggle-trace]")) {
         traceCollapsed = !traceCollapsed;
         savePreference("loop.traceCollapsed", traceCollapsed);
@@ -786,11 +921,6 @@ document.addEventListener("click", event => {
     }
     if (event.target.closest("[data-open-record]"))
         void openRecord();
-    const example = event.target.closest("[data-example]")?.dataset.example;
-    if (example) {
-        $("task").value = example;
-        $("task").focus();
-    }
 });
 $("detail-heading").addEventListener("keydown", event => {
     if (!(event.target instanceof HTMLElement) || !event.target.dataset.tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
@@ -802,9 +932,31 @@ $("detail-heading").addEventListener("keydown", event => {
     render();
     document.getElementById("detail-tab-" + detailTab)?.focus();
 });
-$("follow").onchange = () => render();
 $("sidebar-toggle").onclick = () => { sidebarCollapsed = !sidebarCollapsed; savePreference("loop.sidebarCollapsed", sidebarCollapsed); applyLayout(); };
+$("graph-scroll").addEventListener("scroll", () => {
+    if (!followLatest || followScrollLock || page !== "run")
+        return;
+    const head = conversation.at(-1);
+    if (head?.status !== "running")
+        return;
+    const last = head.events.at(-1);
+    const row = last ? document.getElementById(nodeID(head.id, last.id)) : null;
+    if (!row)
+        return;
+    const root = $("graph-scroll").getBoundingClientRect(), box = row.getBoundingClientRect();
+    if (box.bottom > root.bottom + 40 || box.top < root.top - 8) {
+        followLatest = false;
+        $("follow-latest").hidden = false;
+    }
+}, { passive: true });
 $("refresh-tasks").onclick = () => { void refreshHistory().catch(error => { $("home-note").textContent = message(error); }); };
+$("budget").onchange = () => {
+    const n = Number($("budget").value);
+    if (n >= 1 && n <= 8) {
+        maxRequests = n;
+        savePreference("loop.maxRequests", n);
+    }
+};
 window.addEventListener("popstate", () => { void routeFromLocation(); });
 $("task-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -815,7 +967,7 @@ $("task-form").addEventListener("submit", async (event) => {
     $("submit").disabled = true;
     $("submit").textContent = "正在提交…";
     try {
-        const result = await api("/api/runs", { method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Token": config.token }, body: JSON.stringify({ task: $("task").value, max_requests: Number($("budget").value), ...(page === "run" && conversation.length ? { parent_run_id: conversation.at(-1).id } : {}) }) });
+        const result = await api("/api/runs", { method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Token": config.token }, body: JSON.stringify({ task: $("task").value, max_requests: maxRequests, ...(page === "run" && conversation.length ? { parent_run_id: conversation.at(-1).id } : {}) }) });
         $("task").value = "";
         activeId = result.id;
         await refreshHistory();
@@ -854,6 +1006,7 @@ async function initialize() {
         $("task").value = "";
         $("history-note").textContent = config.history.skipped ? `跳过 ${config.history.skipped} 条无效或未结束记录，原文件保留。` : "历史详情按需读取，不会重跑任务。";
         $("access").textContent = "只读目录：" + config.workspace;
+        $("budget").value = String(maxRequests);
         $("submit").disabled = !config.configured;
         if (!config.configured)
             showError("在启动服务的终端配置 OPENAI_API_KEY 和 OPENAI_MODEL，然后重启服务。");

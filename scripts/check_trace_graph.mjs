@@ -1,4 +1,4 @@
-import {conversationHeads, conversationID, conversationOverview, traceKey} from "../web/dist/conversation.js";
+import {conversationHeads, conversationID, conversationOverview, conversationTitle, shortTitle, traceKey} from "../web/dist/conversation.js";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildTraceGraph, relatedEvents, sameJSON, tokenUsage, runUsage, formatDuration, executionSections, timelineLayout } from '../web/dist/trace-graph.js';
@@ -28,6 +28,13 @@ check('对话侧栏合并连续轮次，旧运行保持独立', () => {
  assert.deepEqual(conversationHeads([next,root,old]).map(x=>x.id),['next','legacy']);
  assert.equal(conversationID(old),'legacy');
  assert.deepEqual(conversationHeads([root,next]).map(x=>x.id),['next']);
+});
+check('对话标题取短标题，空白覆盖回退到自动标题', () => {
+ assert.equal(shortTitle("  你好\n世界  "), "你好 世界");
+ assert.equal(shortTitle("一二三四五六七八九十一二三四五六七八九十一二三"), "一二三四五六七八九十一二三四五六七八九十一二");
+ assert.equal(conversationTitle("hello", "  "), "hello");
+ assert.equal(conversationTitle("hello", "我的实验"), "我的实验");
+ assert.equal(conversationTitle("   ", ""), "未命名对话");
 });
 check('整段对话保留重复事件 ID 的归属，用量与执行时间跨轮累计', () => {
  const first={...example(),id:'first',created_at:100,duration:2,model_requests:2,tool_calls:2};

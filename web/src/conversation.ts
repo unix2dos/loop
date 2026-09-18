@@ -1,6 +1,14 @@
 import type { Run, RunSummary } from "./types.js";
 
 export const conversationID = (run: RunSummary): string => run.conversation_id || run.id;
+export function shortTitle(task: string, max = 22): string {
+ const text = task.replace(/\s+/g, " ").trim();
+ const chars = Array.from(text);
+ return chars.length <= max ? text : chars.slice(0, max).join("").trim();
+}
+export function conversationTitle(task: string, override = ""): string {
+ return override.replace(/\s+/g, " ").trim() || shortTitle(task) || "未命名对话";
+}
 // Keep one sidebar entry per conversation. A saved legacy run is its own root.
 export function conversationHeads(items: RunSummary[]): RunSummary[] {
  const heads = new Map<string, RunSummary>();

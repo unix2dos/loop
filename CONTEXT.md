@@ -1,8 +1,16 @@
 # Loop
 
-Loop is a teaching-oriented Agent learning workbench, used first by its author and shaped by real experiments.
+Loop is being developed as a Coding Agent for beginners, with observable execution and learning grounded in real engineering work.
 
 ## Language
+
+**Learning Coding Agent**:
+An Agent that performs real coding tasks while making its requests, file changes, command execution, and returned results understandable and traceable to beginners.
+_Avoid_: A chatbot that only describes coding, fabricated execution evidence
+
+**Development Learning**:
+The author's study of an engineering mechanism through explanation, source evidence, and real product changes, establishing shared understanding before the related implementation proceeds.
+_Avoid_: Runtime approval, an embedded AI tutor, implementation completion alone
 
 **Learning Workbench**:
 An environment for learning Agent behavior by running tasks, following the relationships between model requests, tool actions and returned results, relating evidence to core code, and changing conditions to test understanding.
@@ -35,6 +43,10 @@ _Avoid_: Time adjacency alone, an invented explanation of the model's internal r
 **Task Conversation**:
 A sequence of user requests and Agent responses directed toward carrying out a task. Follow-ups carry the recorded messages, including tool calls and receipts; starting a new task creates a separate conversation.
 _Avoid_: A learning question about an already recorded action
+
+**Conversation Title**:
+The display name of a Task Conversation. It is not the Task text; it defaults from a short form of the first Task and may be replaced by the learner.
+_Avoid_: Task, first message, sidebar label
 
 **Learning Question**:
 A question about a selected run or event, answered from recorded evidence to help the learner understand its behavior without continuing the task's actions.
