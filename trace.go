@@ -159,19 +159,15 @@ func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, outp
 		return string(raw), err
 	}
 	work := func() (string, error) {
-		messages := append([]Message(nil), prior...)
-		if len(messages) == 0 {
-			messages = append(messages, Message{Role: "system", Content: systemPrompt})
-		}
-		messages = append(messages, Message{Role: "user", Content: run.Task})
+		messages, runtime := BuildTurnMessages(prior, run.Task, run.Workspace, time.Now())
 		if err := record.instant("input", "提交只读任务", map[string]any{"task": run.Task, "conversation_turn": max(1, run.ConversationTurn), "parent_run_id": run.ParentRunID},
 			map[string]any{"workspace": run.Workspace, "access": "Markdown read-only"}, "loop",
 			"用户消息成为本轮输入；追问会携带已有对话，读取新的文件内容仍须通过工具。"); err != nil {
 			return "", err
 		}
 		if err := record.instant("control", "准备上下文和请求额度",
-			map[string]any{"max_requests": run.MaxRequests, "tools": tools, "system": messages[0].Content, "history_messages": len(prior), "parent_run_id": run.ParentRunID}, map[string]any{"status": "ready"}, "loop",
-			"新任务从空历史开始，追问携带上一轮的完整消息。额度只限制本轮模型请求次数，不等于工具调用次数。"); err != nil {
+			map[string]any{"max_requests": run.MaxRequests, "tools": tools, "system": messages[0].Content, "runtime_context": runtime, "system_policy": "current_per_turn", "system_refreshed": len(prior) > 0, "history_messages": len(prior), "parent_run_id": run.ParentRunID}, map[string]any{"status": "ready"}, "context",
+			"本轮使用最新系统规则和服务端日期、时区；保留历史用户、模型与工具消息，不改写旧记录。时间是本轮开始时的快照；额度只限制本轮模型请求次数。"); err != nil {
 			return "", err
 		}
 		for _, message := range messages {

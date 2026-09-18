@@ -322,7 +322,11 @@ function rowText(event: TraceEvent): string {
   const result = event.output?.error ?? (event.output?.content ? String(event.output.content) : event.output?.files ? JSON.stringify(event.output.files) : summary(event));
   return event.title + " " + args + " → " + String(result);
  }
- if (typeof event.input.system === "string") return "准备上下文 · 模型请求额度 " + String(event.input.max_requests ?? "—") + " · " + event.input.system;
+ if (typeof event.input.system === "string") {
+  const runtime=object(event.input.runtime_context);
+  if (typeof runtime.date === "string") return `本轮上下文 · ${runtime.date} · ${String(runtime.time_zone ?? "")} · ${event.input.system_refreshed ? "更新系统规则，保留历史对话" : "新对话"} · 模型请求额度 ${String(event.input.max_requests ?? "—")}`;
+  return "准备上下文 · 模型请求额度 " + String(event.input.max_requests ?? "—") + " · " + event.input.system;
+ }
  if (rowRole(event) === "RESULT") return "交回工具回执 · " + String(event.output?.content ?? "");
  return event.title;
 }

@@ -1,5 +1,6 @@
 .venv/
 .vercel/
+.railway/
 .agent_state/
 .env
 .env.*

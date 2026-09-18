@@ -153,6 +153,7 @@ func sourceRecords() (map[string]Source, string, error) {
 		return nil, "", err
 	}
 	for _, definition := range []struct{ key, file, function string }{
+		{"context", "context.go", "BuildTurnMessages"},
 		{"loop", "agent.go", "RunLoop"}, {"dispatch", "tools.go", "ExecuteReadonly"},
 		{"read", "tools.go", "ReadFile"}, {"list", "tools.go", "ListFiles"},
 	} {

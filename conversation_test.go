@@ -97,9 +97,13 @@ func TestConversationContinuationHTTP(t *testing.T) {
 	}
 	child := finish(id)
 	request := <-captured
-	expected := append(append([]Message(nil), original...), Message{Role: "user", Content: "根据刚才的结果继续"})
-	if !reflect.DeepEqual(request.Messages, expected) {
+	expected := append(append([]Message(nil), original[1:]...), Message{Role: "user", Content: "根据刚才的结果继续"})
+	if request.Messages[0].Role != "system" || !strings.HasPrefix(request.Messages[0].Content, systemPrompt) || !reflect.DeepEqual(request.Messages[1:], expected) {
 		t.Fatal("follow-up lost or changed model/tool history")
+	}
+	contextEvent := child.Events[1]
+	if contextEvent.Input["system"] != request.Messages[0].Content || contextEvent.Input["system_policy"] != "current_per_turn" || contextEvent.Code != "context" {
+		t.Fatal("trace does not describe the actual system context")
 	}
 	if child.ConversationID != root.ID || child.ParentRunID != root.ID || child.ConversationTurn != 2 || child.MaxRequests != 1 || child.ModelRequests != 1 || child.Status != "completed" {
 		t.Fatalf("bad continuation: %+v", child)

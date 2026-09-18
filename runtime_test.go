@@ -504,3 +504,35 @@ func TestPublicHealthAndOrigin(t *testing.T) {
 		t.Fatal("local mode still rejects public hosts", status)
 	}
 }
+
+func TestMigrateLegacyState(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dst := defaultStateDir()
+	if dst != filepath.Join(home, ".loop", "runs") {
+		t.Fatal(dst)
+	}
+	if err := os.MkdirAll(filepath.Join(".agent_state", "runs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(".agent_state", "runs", "kept"), []byte("ok"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateLegacyState("/tmp/loop-runs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(".agent_state", "runs", "kept")); err != nil {
+		t.Fatal("explicit state-dir must not move local records")
+	}
+	if err := migrateLegacyState(dst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".loop", "runs", "kept")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(".agent_state"); !os.IsNotExist(err) {
+		t.Fatal("legacy directory remained in the source tree")
+	}
+}
