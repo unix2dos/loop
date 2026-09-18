@@ -471,6 +471,7 @@ function render(): void {
   $("submit").textContent = busy ? "正在运行…" : page === "run" ? "发送追问 →" : newExercise ? "授权并运行练习 →" : "开始任务 →";
   const coding = page === "run" ? !!run?.exercise : newExercise;
   $("coding-consent").hidden = !(page === "new" && newExercise);
+  $("coding-consent").textContent = `本轮最多 ${maxRequests} 次模型请求，练习建议 6 次。点击“授权并运行练习”，允许 Loop 只修改本次独立项目的 average.go，并在断网容器内运行测试。测试文件受保护。`;
   $("mode-label").textContent = coding ? "Go 修复练习" : "对话与只读工具";
   $("access").textContent = coding ? (run ? "独立练习：" + run.workspace : "将创建独立副本 · 不修改现有项目") : "只读目录：" + config.workspace;
   if (!run) {
@@ -643,7 +644,7 @@ document.addEventListener("click", event => {
   if (event.target.closest("[data-coding]") && config?.coding_ready) {
    newExercise = true; $("task").value = config.coding_task;
    $("conversation-title").textContent = "修复一个 Go 程序";
-   setHTML("conversation", '<div class="welcome"><span class="eyebrow">第一次 Coding 练习</span><h3>让失败的测试变绿。</h3><p>一个平均值函数遇到空输入就崩溃。Loop 会在独立副本里读取代码、修复它，并用原有测试验证。每次修改和测试输出都能在右侧查看。</p><p>授权范围：仅修改 average.go；测试和 go.mod 受保护；仅在断网容器内运行 go test ./...。</p><button type="button" data-new-task>返回普通对话</button></div>');
+   setHTML("conversation", '<div class="welcome"><span class="eyebrow">第一次 Coding 练习</span><h3>让失败的测试变绿。</h3><p>一个平均值函数遇到空输入就崩溃。Loop 会在独立副本里读取代码、修复它，并用原有测试验证。每次修改和测试输出都能在右侧查看。</p><p>授权范围：仅修改 average.go；测试和 go.mod 受保护；仅在断网容器内运行 go test ./...。</p><button type="button" data-settings>调整请求上限</button> <button type="button" data-new-task>返回普通对话</button></div>');
    render(); $("task").focus(); return;
   }
   if (event.target.closest("[data-new-task]")) { showNewTask(); return; }
