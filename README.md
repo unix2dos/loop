@@ -1,7 +1,5 @@
 # Loop
 
-<img src="assets/branding/loop-icon-v1.png" alt="Loop icon" width="72">
-
 **运行 Agent，看清每一步。**
 
 A local workbench for running an agent and inspecting every model request, tool call, and receipt.
