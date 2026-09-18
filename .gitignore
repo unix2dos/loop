@@ -1,4 +1,5 @@
 .venv/
+.vercel/
 .agent_state/
 .env
 .env.*
@@ -10,4 +11,9 @@ __pycache__/
 node_modules/
 /levon
 /loop
+/loop-next
 /dist/
+*.exe
+*.test
+coverage.out
+*.log

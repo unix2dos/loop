@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -21,15 +23,35 @@ func main() {
 	state := flag.String("state-dir", ".agent_state/runs", "运行记录目录")
 	port := flag.Int("port", 8877, "本机 HTTP 端口")
 	flag.Parse()
+	addr, err := listenAddr(*port)
+	if err != nil {
+		log.Fatal(err)
+	}
 	app, err := NewServer(*workspace, *state, HTTPModel)
 	if err != nil {
 		log.Fatal(err)
 	}
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Loop：http://%s\n只读 Markdown 工作区：%s\n", listener.Addr(), app.workspace)
 	server := &http.Server{Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Fatal(server.Serve(listener))
+}
+
+func listenAddr(flagPort int) (string, error) {
+	port := flagPort
+	if value := os.Getenv("PORT"); value != "" {
+		number, err := strconv.Atoi(value)
+		if err != nil || number < 1 || number > 65535 {
+			return "", fmt.Errorf("invalid PORT")
+		}
+		port = number
+	}
+	host := "127.0.0.1"
+	if os.Getenv("LOOP_PUBLIC") == "1" {
+		host = "0.0.0.0"
+	}
+	return fmt.Sprintf("%s:%d", host, port), nil
 }

@@ -443,3 +443,64 @@ func TestAllHistoryAndLazyDetail(t *testing.T) {
 		t.Fatal("linked run file allowed")
 	}
 }
+
+func TestListenAddr(t *testing.T) {
+	t.Setenv("PORT", "")
+	t.Setenv("LOOP_PUBLIC", "")
+	addr, err := listenAddr(8877)
+	if err != nil || addr != "127.0.0.1:8877" {
+		t.Fatal(addr, err)
+	}
+	t.Setenv("PORT", "8080")
+	t.Setenv("LOOP_PUBLIC", "1")
+	addr, err = listenAddr(8877)
+	if err != nil || addr != "0.0.0.0:8080" {
+		t.Fatal(addr, err)
+	}
+	t.Setenv("PORT", "not-a-port")
+	if _, err = listenAddr(8877); err == nil {
+		t.Fatal("invalid PORT accepted")
+	}
+}
+
+func TestPublicHealthAndOrigin(t *testing.T) {
+	app, err := NewServer(workspace(t), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOOP_PUBLIC", "1")
+	get := func(path, host, origin, site string) int {
+		req := httptest.NewRequest("GET", "http://127.0.0.1:8877"+path, nil)
+		if host != "" {
+			req.Host = host
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if site != "" {
+			req.Header.Set("Sec-Fetch-Site", site)
+		}
+		result := httptest.NewRecorder()
+		app.ServeHTTP(result, req)
+		return result.Code
+	}
+	if status := get("/healthz", "loop.example", "", ""); status != 200 {
+		t.Fatal("healthz", status)
+	}
+	if status := get("/readyz", "loop.example", "https://attacker.example", "cross-site"); status != 200 {
+		t.Fatal("readyz must stay public", status)
+	}
+	if status := get("/api/config", "loop.example", "https://loop.example", ""); status != 200 {
+		t.Fatal("public origin", status)
+	}
+	if status := get("/api/config", "loop.example", "https://attacker.example", ""); status != 403 {
+		t.Fatal("cross origin", status)
+	}
+	if status := get("/api/config", "loop.example", "https://loop.example", "cross-site"); status != 403 {
+		t.Fatal("cross-site", status)
+	}
+	t.Setenv("LOOP_PUBLIC", "")
+	if status := get("/api/config", "loop.example", "", ""); status != 403 {
+		t.Fatal("local mode still rejects public hosts", status)
+	}
+}

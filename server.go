@@ -55,6 +55,9 @@ func NewServer(workspace, state string, factory CallerFactory) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
+	if err = os.MkdirAll(state, 0700); err != nil {
+		return nil, err
+	}
 	history, skipped, err := loadHistory(state)
 	if err != nil {
 		return nil, err
@@ -131,9 +134,31 @@ func localRequest(r *http.Request) bool {
 	return r.Header.Get("Sec-Fetch-Site") != "cross-site"
 }
 
+func allowedRequest(r *http.Request) bool {
+	if os.Getenv("LOOP_PUBLIC") != "1" {
+		return localRequest(r)
+	}
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	return origin == "http://"+r.Host || origin == "https://"+r.Host
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !localRequest(r) {
-		respond(w, 403, map[string]any{"error": "仅接受同源本机请求"})
+	if r.Method == http.MethodGet && (r.URL.Path == "/healthz" || r.URL.Path == "/readyz") {
+		status := "ok"
+		if r.URL.Path == "/readyz" {
+			status = "ready"
+		}
+		respond(w, 200, map[string]any{"status": status})
+		return
+	}
+	if !allowedRequest(r) {
+		respond(w, 403, map[string]any{"error": "仅接受同源请求"})
 		return
 	}
 	if r.Method == http.MethodGet {

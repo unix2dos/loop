@@ -1,0 +1,7 @@
+.agent_state
+.git
+.venv
+node_modules
+/dist
+.playwright-mcp
+*.png
