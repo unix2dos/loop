@@ -22,7 +22,7 @@ export interface TraceEvent {
   explanation: string;
 }
 export interface RunSummary {
-  exercise?: "go-average";
+  exercise?: "ts-average";
   parent_run_id?: string;
   conversation_id?: string;
   conversation_turn?: number;

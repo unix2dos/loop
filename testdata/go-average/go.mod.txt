@@ -1,3 +1,0 @@
-module loop.exercise/average
-
-go 1.24.0

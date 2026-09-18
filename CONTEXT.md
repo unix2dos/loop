@@ -1,6 +1,6 @@
 # Loop
 
-Loop is being developed as a Coding Agent for beginners, with observable execution and learning grounded in real engineering work.
+Loop is being developed as a Coding Agent for beginners, with observable execution and learning grounded in real engineering work. Building a useful, maintainable product takes priority over the author's learning; learning supports that product goal.
 
 ## Language
 

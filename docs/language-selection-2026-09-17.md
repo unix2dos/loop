@@ -1,3 +1,5 @@
+> 历史资料：本文记录全 TS 迁移前的研究或验收。所引用的旧代码保存在 Git 提交 `4cb0a3b` 及更早历史中；当前运行方式以项目 README 为准。
+
 # Loop 技术栈选型调研
 
 日期：2026-09-17。用户已认可 Go 内核 + TypeScript 网页路线，已记录为 [ADR-0001](adr/0001-go-runtime-typescript-ui.md)。本文保留调研时的证据与判断；后续实施已迁移入口，参见[当前启动说明](../README.md)及[Python 对照版本](python-reference.md)。调研与后续实施是不同阶段。

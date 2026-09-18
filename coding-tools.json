@@ -3,7 +3,7 @@
     "type": "function",
     "function": {
       "name": "list_files",
-      "description": "列出本次独立 Go 练习项目的文件。",
+      "description": "列出本次独立 TypeScript 练习项目的文件。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -32,9 +32,9 @@
           "path": {
             "type": "string",
             "enum": [
-              "average.go",
-              "average_test.go",
-              "go.mod",
+              "average.ts",
+              "average.test.ts",
+              "package.json",
               "README.md"
             ]
           }
@@ -50,14 +50,14 @@
     "type": "function",
     "function": {
       "name": "write_file",
-      "description": "修改 average.go。expected_sha256 必须等于最近读取的当前文件哈希；拒绝覆盖已变化的版本。测试和 go.mod 不可修改。",
+      "description": "修改 average.ts。expected_sha256 必须等于最近读取的当前文件哈希；拒绝覆盖已变化的版本。测试和 package.json 不可修改。",
       "parameters": {
         "type": "object",
         "properties": {
           "path": {
             "type": "string",
             "enum": [
-              "average.go"
+              "average.ts"
             ]
           },
           "content": {
@@ -80,14 +80,14 @@
     "type": "function",
     "function": {
       "name": "run_command",
-      "description": "在无网络容器中运行 go test ./...（程序添加 -count=1 禁用结果缓存）。返回实际 stdout、stderr、退出码与被测源码哈希。测试失败也是回执，可以修正代码后再试。",
+      "description": "在无网络容器中运行 node --test average.test.ts。返回实际 stdout、stderr、退出码与被测源码哈希。测试失败也是回执，可以修正代码后再试。",
       "parameters": {
         "type": "object",
         "properties": {
           "command": {
             "type": "string",
             "enum": [
-              "go test ./..."
+              "node --test average.test.ts"
             ]
           }
         },

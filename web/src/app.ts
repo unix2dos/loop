@@ -234,7 +234,7 @@ async function showHome(changeURL = true): Promise<void> {
 function showNewTask(changeURL = true): void {
  page = "new"; resetRunView(); showError(""); if (changeURL) updateURL(null, true); applyLayout(); renderTaskLists();
  $("conversation-title").textContent = "新任务";
- setHTML("conversation", `<div class="welcome"><span class="eyebrow">运行与观察</span><h3>从一个问题开始。</h3><p>输入任务，阅读回答。需要观察过程时，在右侧查看模型请求、工具与回执。</p>${config?.coding_available ? `<button type="button" data-coding ${config.coding_ready ? "" : "disabled"}>修复一个 Go 程序 ↗</button><p>${config.coding_ready ? "观察一次真实的测试、改代码、再测试。" : esc(config.coding_message)}</p>` : ""}</div>`);
+ setHTML("conversation", `<div class="welcome"><span class="eyebrow">运行与观察</span><h3>从一个问题开始。</h3><p>输入任务，阅读回答。需要观察过程时，在右侧查看模型请求、工具与回执。</p>${config?.coding_available ? `<button type="button" data-coding ${config.coding_ready ? "" : "disabled"}>修复一个 TypeScript 程序 ↗</button><p>${config.coding_ready ? "观察一次真实的测试、改代码、再测试。" : esc(config.coding_message)}</p>` : ""}</div>`);
  setHTML("graph", '<div class="empty-graph"><p>还没有执行记录。<br>提交任务后，过程会在这里出现。</p></div>');
  if (!config?.configured) showError("请先在服务端配置模型，然后重启。");
  $("task").value = ""; $("task").focus(); render(); void pollTaskList();
@@ -284,7 +284,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { cache: "no-store", ...options });
   const result: unknown = await response.json();
   if (!response.ok) throw new Error(typeof object(result).error === "string" ? String(object(result).error) : "请求失败");
-  // The local Go API validates persisted runs and model/tool inputs at its boundaries.
+  // The local TypeScript API validates persisted runs and model/tool inputs at its boundaries.
   return result as T;
 }
 function summary(event: TraceEvent): string {
@@ -320,8 +320,8 @@ function rowText(event: TraceEvent): string {
   return typeof content === "string" && content.trim() ? content : summary(event);
  }
  if (event.kind === "tool") {
-  if (event.title === "run_command") return `${event.output?.command ?? "go test ./..."} → ${event.output?.timed_out ? "执行超时" : event.output?.exit_code !== null && event.output?.exit_code !== undefined ? "退出码 " + event.output.exit_code : "退出状态未确认"}`;
-  if (event.title === "write_file") return `${event.output?.path ?? "average.go"} → ${event.output?.error ?? (event.output?.changed ? "已修改 · 查看真实 diff" : "内容未变化")}`;
+  if (event.title === "run_command") return `${event.output?.command ?? "node --test average.test.ts"} → ${event.output?.timed_out ? "执行超时" : event.output?.exit_code !== null && event.output?.exit_code !== undefined ? "退出码 " + event.output.exit_code : "退出状态未确认"}`;
+  if (event.title === "write_file") return `${event.output?.path ?? "average.ts"} → ${event.output?.error ?? (event.output?.changed ? "已修改 · 查看真实 diff" : "内容未变化")}`;
   const args = typeof event.input.arguments === "string" ? event.input.arguments : JSON.stringify(event.input.arguments);
   const result = event.output?.error ?? (event.output?.content ? String(event.output.content) : event.output?.files ? JSON.stringify(event.output.files) : summary(event));
   return event.title + " " + args + " → " + String(result);
@@ -471,8 +471,8 @@ function render(): void {
   $("submit").textContent = busy ? "正在运行…" : page === "run" ? "发送追问 →" : newExercise ? "授权并运行练习 →" : "开始任务 →";
   const coding = page === "run" ? !!run?.exercise : newExercise;
   $("coding-consent").hidden = !(page === "new" && newExercise);
-  $("coding-consent").textContent = `本轮最多 ${maxRequests} 次模型请求，练习建议 6 次。点击“授权并运行练习”，允许 Loop 只修改本次独立项目的 average.go，并在断网容器内运行测试。测试文件受保护。`;
-  $("mode-label").textContent = coding ? "Go 修复练习" : "对话与只读工具";
+  $("coding-consent").textContent = `本轮最多 ${maxRequests} 次模型请求，练习建议 6 次。点击“授权并运行练习”，允许 Loop 只修改本次独立项目的 average.ts，并在断网容器内运行测试。测试文件受保护。`;
+  $("mode-label").textContent = coding ? "TypeScript 修复练习" : "对话与只读工具";
   $("access").textContent = coding ? (run ? "独立练习：" + run.workspace : "将创建独立副本 · 不修改现有项目") : "只读目录：" + config.workspace;
   if (!run) {
    $("follow-latest").hidden = true;
@@ -643,8 +643,8 @@ document.addEventListener("click", event => {
   if (event.target.closest("[data-home]")) { void showHome(); return; }
   if (event.target.closest("[data-coding]") && config?.coding_ready) {
    newExercise = true; $("task").value = config.coding_task;
-   $("conversation-title").textContent = "修复一个 Go 程序";
-   setHTML("conversation", '<div class="welcome"><span class="eyebrow">第一次 Coding 练习</span><h3>让失败的测试变绿。</h3><p>一个平均值函数遇到空输入就崩溃。Loop 会在独立副本里读取代码、修复它，并用原有测试验证。每次修改和测试输出都能在右侧查看。</p><p>授权范围：仅修改 average.go；测试和 go.mod 受保护；仅在断网容器内运行 go test ./...。</p><button type="button" data-settings>调整请求上限</button> <button type="button" data-new-task>返回普通对话</button></div>');
+   $("conversation-title").textContent = "修复一个 TypeScript 程序";
+   setHTML("conversation", '<div class="welcome"><span class="eyebrow">第一次 Coding 练习</span><h3>让失败的测试变绿。</h3><p>一个平均值函数遇到空输入就出错。Loop 会在独立副本里读取代码、修复它，并用原有测试验证。每次修改和测试输出都能在右侧查看。</p><p>授权范围：仅修改 average.ts；测试和 package.json 受保护；仅在断网容器内运行 node --test average.test.ts。</p><button type="button" data-settings>调整请求上限</button> <button type="button" data-new-task>返回普通对话</button></div>');
    render(); $("task").focus(); return;
   }
   if (event.target.closest("[data-new-task]")) { showNewTask(); return; }
@@ -691,7 +691,7 @@ $("task-form").addEventListener("submit", async event => {
   if (!config || busy || (page === "run" && !conversationReady)) return;
   showError(""); busy = true; $("submit").disabled = true; $("submit").textContent = "正在提交…";
   try {
-    const result = await api<{ id: string }>("/api/runs", { method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Token": config.token }, body: JSON.stringify({ task: $("task").value, max_requests: maxRequests, ...(page === "new" && newExercise ? { exercise: "go-average", approve_exercise: true } : {}), ...(page === "run" && conversation.length ? { parent_run_id: conversation.at(-1)!.id } : {}) }) });
+    const result = await api<{ id: string }>("/api/runs", { method: "POST", headers: { "Content-Type": "application/json", "X-Lab-Token": config.token }, body: JSON.stringify({ task: $("task").value, max_requests: maxRequests, ...(page === "new" && newExercise ? { exercise: "ts-average", approve_exercise: true } : {}), ...(page === "run" && conversation.length ? { parent_run_id: conversation.at(-1)!.id } : {}) }) });
     $("task").value = "";
     activeId = result.id; await refreshHistory(); await chooseRun(result.id);
     $("conversation").scrollTop = $("conversation").scrollHeight;
