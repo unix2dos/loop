@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /server .
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-    10|COPY --from=build /server /server
+COPY --from=build /server /server
 COPY workspace /app/workspace
 ENV LOOP_PUBLIC=1
 USER 65532:65532

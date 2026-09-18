@@ -1,0 +1,7 @@
+.git
+.agent_state
+.vercel
+.railway
+node_modules
+dist
+*.exe
