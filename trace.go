@@ -71,6 +71,14 @@ func (r *recorder) instant(kind, title string, input, output any, code, explanat
 func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, output string, mu *sync.Mutex, prior []Message) error {
 	record := recorder{run: run, mu: mu, path: filepath.Join(output, "trace.jsonl"), started: time.Now()}
 	session := filepath.Join(output, "session.jsonl")
+	access, dispatch, executorName := readonlyAccess, "dispatch", "ExecuteReadonly"
+	if run.Exercise == codingExercise {
+		access, dispatch, executorName = codingAccess, "coding_dispatch", "ExecuteCoding"
+	}
+	allowedTools := []string{}
+	for _, tool := range tools {
+		allowedTools = append(allowedTools, tool.Function.Name)
+	}
 	model := func(ctx context.Context, input ModelRequest) (ModelResponse, error) {
 		mu.Lock()
 		run.ModelRequests++
@@ -111,17 +119,23 @@ func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, outp
 		run.ToolCalls++
 		count := run.ToolCalls
 		mu.Unlock()
-		if err := record.instant("control", "选择只读工具执行器",
+		if err := record.instant("control", "选择工具执行器",
 			map[string]any{"tool": tool.Function.Name, "arguments": tool.Function.Arguments, "tool_call_id": tool.ID},
-			map[string]any{"executor": "ExecuteReadonly", "allowed_tools": []string{"list_files", "read_file"}}, "dispatch",
+			map[string]any{"executor": executorName, "allowed_tools": allowedTools, "exercise": run.Exercise}, dispatch,
 			"这里选择受限执行器。参数与路径是否通过，以下一条工具事件的真实结果为准。"); err != nil {
 			return "", err
 		}
-		code := "dispatch"
+		code := dispatch
+		if run.Exercise == codingExercise && tool.Function.Name == "write_file" {
+			code = "write"
+		}
+		if run.Exercise == codingExercise && tool.Function.Name == "run_command" {
+			code = "command"
+		}
 		if tool.Function.Name == "read_file" {
 			code = "read"
 		}
-		if tool.Function.Name == "list_files" {
+		if run.Exercise == "" && tool.Function.Name == "list_files" {
 			code = "list"
 		}
 		event, err := record.begin("tool", tool.Function.Name, map[string]any{"arguments": tool.Function.Arguments, "tool_call_id": tool.ID}, code,
@@ -132,11 +146,16 @@ func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, outp
 		var result map[string]any
 		if count > 24 {
 			result = map[string]any{"error": "tool_budget_exhausted"}
+		} else if run.Exercise == codingExercise {
+			result, err = ExecuteCoding(ctx, run.Workspace, tool)
 		} else {
 			result, err = ExecuteReadonly(ctx, run.Workspace, tool)
 		}
 		if err != nil {
-			_ = record.finish(event, errorDetails(err), "failed")
+			if result == nil {
+				result = errorDetails(err)
+			}
+			_ = record.finish(event, result, "failed")
 			return "", err
 		}
 		status := "succeeded"
@@ -159,9 +178,9 @@ func RunTask(ctx context.Context, run *Run, call ModelCaller, tools []Tool, outp
 		return string(raw), err
 	}
 	work := func() (string, error) {
-		messages, runtime := BuildTurnMessages(prior, run.Task, run.Workspace, time.Now())
-		if err := record.instant("input", "提交只读任务", map[string]any{"task": run.Task, "conversation_turn": max(1, run.ConversationTurn), "parent_run_id": run.ParentRunID},
-			map[string]any{"workspace": run.Workspace, "access": "Markdown read-only"}, "loop",
+		messages, runtime := BuildTurnMessages(prior, run.Task, run.Workspace, access, time.Now())
+		if err := record.instant("input", "提交任务", map[string]any{"task": run.Task, "exercise": run.Exercise, "conversation_turn": max(1, run.ConversationTurn), "parent_run_id": run.ParentRunID},
+			map[string]any{"workspace": run.Workspace, "access": access, "exercise_authorized": run.Exercise != ""}, "loop",
 			"用户消息成为本轮输入；追问会携带已有对话，读取新的文件内容仍须通过工具。"); err != nil {
 			return "", err
 		}

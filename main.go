@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-//go:embed index.html tools.json *.go web/dist/*.js
+//go:embed index.html tools.json coding-tools.json *.go web/dist/*.js assets/branding/loop-icon-v1.png testdata/go-average/*
 var assets embed.FS
 
 const defaultTask = "先列出工作区文件，再读取与工具调用最相关的一份笔记。根据原文说明：模型提出工具调用之后，程序还要做什么？请注明文件名和原文依据，只读，不修改文件。"

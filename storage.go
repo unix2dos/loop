@@ -39,6 +39,7 @@ type Event struct {
 	Explanation string         `json:"explanation"`
 }
 type Run struct {
+	Exercise         string            `json:"exercise,omitempty"`
 	ParentRunID      string            `json:"parent_run_id,omitempty"`
 	ConversationID   string            `json:"conversation_id,omitempty"`
 	ConversationTurn int               `json:"conversation_turn,omitempty"`
@@ -63,6 +64,7 @@ type Run struct {
 }
 
 type RunSummary struct {
+	Exercise         string  `json:"exercise,omitempty"`
 	ParentRunID      string  `json:"parent_run_id,omitempty"`
 	ConversationID   string  `json:"conversation_id,omitempty"`
 	ConversationTurn int     `json:"conversation_turn,omitempty"`
@@ -74,7 +76,7 @@ type RunSummary struct {
 }
 
 func summarizeRun(run *Run) RunSummary {
-	return RunSummary{ParentRunID: run.ParentRunID, ConversationID: run.ConversationID, ConversationTurn: run.ConversationTurn, ID: run.ID, Task: run.Task, Model: run.Model, Status: run.Status, CreatedAt: run.CreatedAt}
+	return RunSummary{Exercise: run.Exercise, ParentRunID: run.ParentRunID, ConversationID: run.ConversationID, ConversationTurn: run.ConversationTurn, ID: run.ID, Task: run.Task, Model: run.Model, Status: run.Status, CreatedAt: run.CreatedAt}
 }
 
 func sortedSummaries(history map[string]RunSummary) []RunSummary {
@@ -154,6 +156,7 @@ func sourceRecords() (map[string]Source, string, error) {
 	}
 	for _, definition := range []struct{ key, file, function string }{
 		{"context", "context.go", "BuildTurnMessages"},
+		{"coding_dispatch", "coding.go", "ExecuteCoding"}, {"command", "coding.go", "RunExerciseTests"}, {"write", "coding.go", "WriteExerciseFile"},
 		{"loop", "agent.go", "RunLoop"}, {"dispatch", "tools.go", "ExecuteReadonly"},
 		{"read", "tools.go", "ReadFile"}, {"list", "tools.go", "ListFiles"},
 	} {
@@ -207,6 +210,9 @@ func decodeHistory(raw []byte, id string) (*Run, error) {
 	var run Run
 	if json.Unmarshal(raw, &run) != nil || run.ID != id || !runIDPattern.MatchString(run.ID) {
 		return nil, errors.New("invalid run identity or fields")
+	}
+	if run.Exercise != "" && run.Exercise != codingExercise {
+		return nil, errors.New("invalid exercise")
 	}
 	if run.Status != "completed" && run.Status != "failed" && run.Status != "budget_exhausted" {
 		return nil, errors.New("run not finished")

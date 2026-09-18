@@ -1,0 +1,101 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "list_files",
+      "description": "列出本次独立 Go 练习项目的文件。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "enum": [
+              "."
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "读取练习文件，返回内容和 sha256；修改前先读取以取得当前哈希。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "enum": [
+              "average.go",
+              "average_test.go",
+              "go.mod",
+              "README.md"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write_file",
+      "description": "修改 average.go。expected_sha256 必须等于最近读取的当前文件哈希；拒绝覆盖已变化的版本。测试和 go.mod 不可修改。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "enum": [
+              "average.go"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "expected_sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "expected_sha256"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_command",
+      "description": "在无网络容器中运行 go test ./...（程序添加 -count=1 禁用结果缓存）。返回实际 stdout、stderr、退出码与被测源码哈希。测试失败也是回执，可以修正代码后再试。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "go test ./..."
+            ]
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+]

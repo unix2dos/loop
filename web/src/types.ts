@@ -22,6 +22,7 @@ export interface TraceEvent {
   explanation: string;
 }
 export interface RunSummary {
+  exercise?: "go-average";
   parent_run_id?: string;
   conversation_id?: string;
   conversation_turn?: number;
@@ -53,5 +54,9 @@ export interface Config {
   configured: boolean;
   token: string;
   default_task: string;
+  coding_available: boolean;
+  coding_ready: boolean;
+  coding_message: string;
+  coding_task: string;
   history: { loaded: number; skipped: number };
 }

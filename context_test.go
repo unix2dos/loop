@@ -27,7 +27,7 @@ func TestTurnContextRefreshesWithoutRewritingHistory(t *testing.T) {
 		{"local next day", "2026-09-18", "CST (UTC+08:00)", "2026-09-18T00:01:00+08:00", instant.In(time.FixedZone("CST", 8*3600))},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
-			messages, runtime := BuildTurnMessages(prior, "今天多少号", "/workspace", sample.now)
+			messages, runtime := BuildTurnMessages(prior, "今天多少号", "/workspace", readonlyAccess, sample.now)
 			if runtime.Date != sample.date || runtime.TimeZone != sample.zone || runtime.ObservedAt != sample.observed || runtime.Source != "server_clock" {
 				t.Fatalf("wrong clock snapshot: %+v", runtime)
 			}
@@ -41,7 +41,7 @@ func TestTurnContextRefreshesWithoutRewritingHistory(t *testing.T) {
 			if json.Unmarshal([]byte(strings.SplitN(messages[0].Content, "本轮运行时上下文：\n", 2)[1]), &embedded) != nil || embedded != runtime {
 				t.Fatal("recorded context differs from model input")
 			}
-			next, tomorrow := BuildTurnMessages(messages, "现在呢", "/workspace", sample.now.Add(24*time.Hour))
+			next, tomorrow := BuildTurnMessages(messages, "现在呢", "/workspace", readonlyAccess, sample.now.Add(24*time.Hour))
 			count := 0
 			for _, message := range next {
 				if message.Role == "system" {
@@ -57,7 +57,7 @@ func TestTurnContextRefreshesWithoutRewritingHistory(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("parent messages were modified")
 	}
-	fresh, _ := BuildTurnMessages(nil, "你好", "/workspace", instant)
+	fresh, _ := BuildTurnMessages(nil, "你好", "/workspace", readonlyAccess, instant)
 	if len(fresh) != 2 || fresh[0].Role != "system" || fresh[1].Role != "user" {
 		t.Fatal("new conversation contains unexpected history")
 	}

@@ -170,6 +170,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeResponse(w, 200, raw, "text/html; charset=utf-8")
+		case "/icon.png":
+			raw, err := assets.ReadFile("assets/branding/loop-icon-v1.png")
+			if err != nil {
+				respond(w, 500, map[string]any{"error": "图标不可用"})
+				return
+			}
+			writeResponse(w, 200, raw, "image/png")
 		case "/favicon.ico":
 			writeResponse(w, 204, nil, "image/x-icon")
 		case "/app.js", "/trace-graph.js", "/conversation.js":
@@ -180,9 +187,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			writeResponse(w, 200, raw, "text/javascript; charset=utf-8")
 		case "/api/config":
+			codingAvailable := os.Getenv("LOOP_PUBLIC") != "1" && localRequest(r)
+			codingMessage := "Coding 练习只在本机提供"
+			if codingAvailable {
+				if err := codingReady(); err != nil {
+					codingMessage = err.Error()
+				} else {
+					codingMessage = ""
+				}
+			}
 			respond(w, 200, map[string]any{"workspace": s.workspace, "state_dir": s.state, "model": os.Getenv("OPENAI_MODEL"),
 				"configured": os.Getenv("OPENAI_API_KEY") != "" && os.Getenv("OPENAI_MODEL") != "",
-				"token":      s.token, "default_task": defaultTask, "history": map[string]int{"loaded": s.loaded, "skipped": s.skipped}})
+				"token":      s.token, "default_task": defaultTask, "coding_available": codingAvailable, "coding_ready": codingAvailable && codingMessage == "", "coding_message": codingMessage, "coding_task": codingTask, "history": map[string]int{"loaded": s.loaded, "skipped": s.skipped}})
 		case "/api/runs":
 			s.mu.Lock()
 			for id, run := range s.runs {
@@ -236,9 +252,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload struct {
-		ParentRunID string          `json:"parent_run_id"`
-		Task        string          `json:"task"`
-		MaxRequests json.RawMessage `json:"max_requests"`
+		Exercise        string          `json:"exercise"`
+		ApproveExercise bool            `json:"approve_exercise"`
+		ParentRunID     string          `json:"parent_run_id"`
+		Task            string          `json:"task"`
+		MaxRequests     json.RawMessage `json:"max_requests"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20000))
 	decoder.DisallowUnknownFields()
@@ -256,6 +274,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	budget, parseErr := integerArgument(args, "max_requests", 4)
 	if err != nil || parseErr != nil {
 		respond(w, 400, map[string]any{"error": "任务或请求上限无效"})
+		return
+	}
+	if payload.Exercise != "" && (payload.Exercise != codingExercise || payload.ParentRunID != "") || payload.ApproveExercise && payload.Exercise == "" {
+		respond(w, 400, map[string]any{"error": "练习参数无效；请从新的 Coding 练习开始"})
+		return
+	}
+	if payload.Exercise != "" && (!payload.ApproveExercise || os.Getenv("LOOP_PUBLIC") == "1" || !localRequest(r)) {
+		respond(w, 403, map[string]any{"error": "Coding 练习需要本机用户明确授权"})
 		return
 	}
 	run, err := s.newRun(payload.Task, budget, os.Getenv("OPENAI_MODEL"))
@@ -285,7 +311,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respond(w, 400, map[string]any{"error": "上一轮记录尚未保存或不可用，无法继续对话"})
 			return
 		}
-		if parent.Workspace != s.workspace {
+		if parent.Exercise == codingExercise {
+			if os.Getenv("LOOP_PUBLIC") == "1" || !localRequest(r) {
+				s.mu.Unlock()
+				respond(w, 403, map[string]any{"error": "Coding 练习仅限本机访问"})
+				return
+			}
+			rootID := parent.ConversationID
+			if rootID == "" {
+				rootID = parent.ID
+			}
+			root, rootErr := readStoredRun(s.state, rootID)
+			run.Workspace = filepath.Join(s.state, rootID, "workspace")
+			if rootErr != nil || root.Exercise != codingExercise || checkExercise(run.Workspace) != nil {
+				s.mu.Unlock()
+				respond(w, 400, map[string]any{"error": "授权练习的文件不可用或已变化，请开始新的练习"})
+				return
+			}
+			run.Exercise = codingExercise
+		} else if parent.Workspace != s.workspace {
 			s.mu.Unlock()
 			respond(w, 400, map[string]any{"error": "当前工作区与这段历史不同，请切回原工作区或开始新任务"})
 			return
@@ -301,6 +345,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			run.ConversationID = parent.ID
 		}
 	}
+	if payload.Exercise == codingExercise {
+		run.Exercise = codingExercise
+	}
+	if run.Exercise == codingExercise {
+		if err := codingReady(); err != nil {
+			s.mu.Unlock()
+			respond(w, 503, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+	runTools := s.tools
+	if run.Exercise == codingExercise {
+		raw, _ := assets.ReadFile("coding-tools.json")
+		runTools = nil // Do not let decoding mutate the read-only tools backing array.
+		if json.Unmarshal(raw, &runTools) != nil {
+			s.mu.Unlock()
+			respond(w, 500, map[string]any{"error": "练习工具定义不可用"})
+			return
+		}
+	}
 	sessionID := run.ConversationID
 	if sessionID == "" {
 		sessionID = run.ID
@@ -310,6 +374,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		respond(w, 503, map[string]any{"error": "模型配置不可用，请设置 OPENAI_API_KEY、OPENAI_MODEL，以及可选 OPENAI_BASE_URL"})
 		return
+	}
+	if run.Exercise == codingExercise && run.ParentRunID == "" {
+		run.Workspace, err = prepareExercise(s.state, run.ID)
+		if err != nil {
+			s.mu.Unlock()
+			respond(w, 500, map[string]any{"error": "无法创建独立练习项目"})
+			return
+		}
 	}
 	run.Model = model
 	s.active = true
@@ -326,7 +398,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	go func() {
 		// A Run belongs to the server, not the browser connection that submitted it.
-		err := RunTask(context.Background(), run, call, s.tools, filepath.Join(s.state, run.ID), &s.mu, prior)
+		err := RunTask(context.Background(), run, call, runTools, filepath.Join(s.state, run.ID), &s.mu, prior)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if err != nil {

@@ -1,7 +1,9 @@
 FROM golang:1.24-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS build
 WORKDIR /src
 COPY go.mod ./
-COPY *.go index.html tools.json ./
+COPY *.go index.html tools.json coding-tools.json ./
+COPY assets/branding/loop-icon-v1.png assets/branding/loop-icon-v1.png
+COPY testdata/go-average testdata/go-average
 COPY web/dist web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /server .
 
