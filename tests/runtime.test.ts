@@ -150,7 +150,7 @@ test('public visitors see only their own runs; daily model quota survives restar
     const first = await post(a, { task: 'a' });
     assert.equal(first.status, 202);
     const id = (await first.json()).id as string;
-    await finished(base, id, a);
+    assert.equal('visitor_id' in await finished(base, id, a), false);
     assert.deepEqual((await (await fetch(base + '/api/runs', { headers: { Cookie: b } })).json() as Run[]).map(run => run.id), []);
     assert.equal((await fetch(base + '/api/runs/' + id, { headers: { Cookie: b } })).status, 404);
     assert.equal((await post(b, { task: 'steal', parent_run_id: id })).status, 404);
@@ -172,6 +172,25 @@ test('public visitors see only their own runs; daily model quota survives restar
     assert.equal(bHistory.length, 1);
     assert.equal((await fetch(next + '/api/runs/' + bHistory[0].id, { headers: { Cookie: a } })).status, 404);
     assert.equal((await fetch(next + '/api/runs', { method: 'POST', headers: { Cookie: a, 'Content-Type': 'application/json', 'X-Lab-Token': restarted.token }, body: JSON.stringify({ task: 'still over quota' }) })).status, 429);
+});
+test('public model quota stops a running task with a distinct reason', async t => {
+    const previous = { public: process.env.LOOP_PUBLIC, daily: process.env.LOOP_PUBLIC_DAILY_REQUESTS };
+    process.env.LOOP_PUBLIC = '1';
+    process.env.LOOP_PUBLIC_DAILY_REQUESTS = '1';
+    t.after(() => {
+        if (previous.public === undefined) delete process.env.LOOP_PUBLIC; else process.env.LOOP_PUBLIC = previous.public;
+        if (previous.daily === undefined) delete process.env.LOOP_PUBLIC_DAILY_REQUESTS; else process.env.LOOP_PUBLIC_DAILY_REQUESTS = previous.daily;
+    });
+    const { work, state } = setup(t);
+    const app = NewServer(work, state, () => ({ model: 'fake', call: async () => structuredClone(cases[0].responses[0]) }));
+    const base = await listening(t, app);
+    const config = await fetch(base + '/api/config');
+    const cookie = config.headers.get('set-cookie')!.split(';')[0];
+    const response = await fetch(base + '/api/runs', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', 'X-Lab-Token': app.token }, body: JSON.stringify({ task: 'quota', max_requests: 2 }) });
+    assert.equal(response.status, 202);
+    const run = await finished(base, (await response.json()).id, cookie);
+    assert.equal(run.status, 'budget_exhausted');
+    assert.equal(run.error?.message, '公共模型额度已用完');
 });
 test('HTTP lifecycle, isolation, restart, continuation and current-head enforcement', async (t) => {
     const { work, state } = setup(t);

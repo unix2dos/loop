@@ -4,6 +4,7 @@
 .railway
 node_modules
 dist
+web/dist
 *.exe
 
 .env

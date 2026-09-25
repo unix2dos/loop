@@ -1,5 +1,5 @@
 import type { Message, ModelCaller, ModelResponse, ToolCall } from './agent.ts';
-import { errBudget } from './agent.ts';
+import { errBudget, errPublicQuota } from './agent.ts';
 import { object } from './storage.ts';
 export class ModelError extends Error {
     status?: number;
@@ -107,7 +107,7 @@ export function HTTPModel(runID: string): {
     return { call, model };
 }
 export function errorDetails(error: unknown): Record<string, unknown> {
-    const detail: Record<string, unknown> = { error_type: 'RuntimeError', message: error === errBudget ? '模型请求额度耗尽' : '运行失败，请查看失败事件' };
+	const detail: Record<string, unknown> = { error_type: 'RuntimeError', message: error === errBudget ? '本轮模型请求次数已达上限' : error === errPublicQuota ? '公共模型额度已用完' : '运行失败，请查看失败事件' };
     if (error instanceof ModelError) {
         detail.error_type = error.name;
         if (error.status)

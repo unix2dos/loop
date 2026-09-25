@@ -36,6 +36,7 @@ export interface ModelResponse {
 export type ModelCaller = (signal: AbortSignal, input: ModelRequest) => Promise<ModelResponse>;
 export type ToolExecutor = (signal: AbortSignal, call: ToolCall) => Promise<string>;
 export const errBudget = new Error('model request budget exhausted');
+export const errPublicQuota = new Error('public model quota exhausted');
 // Own ordering and stopping; model transport and tool execution are supplied by the caller.
 export async function RunLoop(signal: AbortSignal, call: ModelCaller, execute: ToolExecutor, model: string, tools: Tool[], initial: Message[], session: string, maxRequests: number): Promise<string> {
     if (!Number.isInteger(maxRequests) || maxRequests < 1 || maxRequests > 8)
