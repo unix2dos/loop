@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -119,15 +119,60 @@ async function listening(t: test.TestContext, app: ReturnType<typeof NewServer>)
     t.after(() => new Promise<void>((resolve, reject) => { app.server.close(error => error ? reject(error) : resolve()); app.server.closeAllConnections(); }));
     return `http://127.0.0.1:${(app.server.address() as import('node:net').AddressInfo).port}`;
 }
-async function finished(base: string, id: string): Promise<Run> {
+async function finished(base: string, id: string, cookie = ''): Promise<Run> {
     for (let i = 0; i < 500; i++) {
-        const run = await (await fetch(`${base}/api/runs/${id}`)).json() as Run;
+        const run = await (await fetch(`${base}/api/runs/${id}`, { headers: cookie ? { Cookie: cookie } : {} })).json() as Run;
         if (run.status !== 'running')
             return run;
         await new Promise(r => setTimeout(r, 10));
     }
     throw new Error('run did not finish');
 }
+test('public visitors see only their own runs; daily model quota survives restart and old runs expire', async t => {
+    const previous = { public: process.env.LOOP_PUBLIC, daily: process.env.LOOP_PUBLIC_DAILY_REQUESTS };
+    process.env.LOOP_PUBLIC = '1';
+    process.env.LOOP_PUBLIC_DAILY_REQUESTS = '2';
+    t.after(() => {
+        if (previous.public === undefined) delete process.env.LOOP_PUBLIC; else process.env.LOOP_PUBLIC = previous.public;
+        if (previous.daily === undefined) delete process.env.LOOP_PUBLIC_DAILY_REQUESTS; else process.env.LOOP_PUBLIC_DAILY_REQUESTS = previous.daily;
+    });
+    const { work, state } = setup(t);
+    const factory = () => ({ model: 'fake', call: (async () => ({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] })) as ModelCaller });
+    const app = NewServer(work, state, factory), base = await listening(t, app);
+    const session = async () => {
+        const response = await fetch(base + '/api/config');
+        assert.equal(response.status, 200);
+        return response.headers.get('set-cookie')!.split(';')[0];
+    };
+    const a = await session(), b = await session();
+    assert.notEqual(a, b);
+    const post = (cookie: string, data: unknown) => fetch(base + '/api/runs', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', 'X-Lab-Token': app.token }, body: JSON.stringify(data) });
+    const first = await post(a, { task: 'a' });
+    assert.equal(first.status, 202);
+    const id = (await first.json()).id as string;
+    await finished(base, id, a);
+    assert.deepEqual((await (await fetch(base + '/api/runs', { headers: { Cookie: b } })).json() as Run[]).map(run => run.id), []);
+    assert.equal((await fetch(base + '/api/runs/' + id, { headers: { Cookie: b } })).status, 404);
+    assert.equal((await post(b, { task: 'steal', parent_run_id: id })).status, 404);
+    assert.equal((await fetch(base + '/api/runs')).status, 403);
+    const second = await post(b, { task: 'b' });
+    assert.equal(second.status, 202);
+    await finished(base, (await second.json()).id, b);
+    assert.equal((await post(a, { task: 'over quota' })).status, 429);
+    const stale = readStoredRun(state, id);
+    stale.created_at = Date.now() / 1000 - 8 * 86400;
+    saveRun(join(state, id, 'run.json'), stale);
+    const restarted = NewServer(work, state, factory), next = await listening(t, restarted);
+    assert.equal((await fetch(next + '/api/config', { headers: { Cookie: a } })).status, 200);
+    assert.equal(existsSync(join(state, id)), false);
+    assert.equal((await fetch(next + '/api/runs/' + id, { headers: { Cookie: a } })).status, 404);
+    const aHistory = await (await fetch(next + '/api/runs', { headers: { Cookie: a } })).json() as Run[];
+    const bHistory = await (await fetch(next + '/api/runs', { headers: { Cookie: b } })).json() as Run[];
+    assert.equal(aHistory.length, 0);
+    assert.equal(bHistory.length, 1);
+    assert.equal((await fetch(next + '/api/runs/' + bHistory[0].id, { headers: { Cookie: a } })).status, 404);
+    assert.equal((await fetch(next + '/api/runs', { method: 'POST', headers: { Cookie: a, 'Content-Type': 'application/json', 'X-Lab-Token': restarted.token }, body: JSON.stringify({ task: 'still over quota' }) })).status, 429);
+});
 test('HTTP lifecycle, isolation, restart, continuation and current-head enforcement', async (t) => {
     const { work, state } = setup(t);
     const requests: ModelRequest[] = [];

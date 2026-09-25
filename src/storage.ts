@@ -77,8 +77,8 @@ export function atomicWrite(path: string, content: string, mode = 0o600): void {
 }
 export function saveRun(path: string, run: Run): void { atomicWrite(path, JSON.stringify(run, null, 2) + '\n'); }
 export function summarizeRun(run: Run): RunSummary {
-    const { id, task, model, status, created_at, exercise, parent_run_id, conversation_id, conversation_turn } = run;
-    return { id, task, model, status, created_at, ...(exercise ? { exercise } : {}), ...(parent_run_id ? { parent_run_id, conversation_id } : {}), conversation_turn };
+    const { id, task, model, status, created_at, exercise, parent_run_id, conversation_id, conversation_turn, visitor_id } = run;
+    return { id, task, model, status, created_at, ...(exercise ? { exercise } : {}), ...(parent_run_id ? { parent_run_id, conversation_id } : {}), ...(visitor_id ? { visitor_id } : {}), conversation_turn };
 }
 export function sortedSummaries(history: Map<string, RunSummary>): RunSummary[] {
     return [...history.values()].sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
@@ -125,6 +125,8 @@ export function decodeHistory(raw: Buffer | string, id: string): Run {
         throw new Error('invalid run identity');
     for (const key of ['task', 'model', 'workspace', 'answer', 'task_result', 'build_id'])
         text(run[key]);
+    if (run.visitor_id !== undefined && !/^[a-f0-9]{64}$/.test(text(run.visitor_id)))
+        throw new Error('invalid visitor');
     if (run.exercise !== undefined && run.exercise !== 'ts-average')
         throw new Error('invalid exercise');
     if (!['completed', 'failed', 'budget_exhausted'].includes(text(run.status)))

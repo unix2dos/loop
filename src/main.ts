@@ -5,7 +5,7 @@ import { projectRoot } from './storage.ts';
 import { NewServer } from './server.ts';
 const { values } = parseArgs({ options: {
         workspace: { type: 'string', default: join(projectRoot, 'workspace') },
-        'state-dir': { type: 'string', default: join(homedir(), '.loop', 'ts-runs') },
+        'state-dir': { type: 'string', default: join(homedir(), '.loop', process.env.LOOP_PUBLIC === '1' ? 'public-runs' : 'ts-runs') },
         port: { type: 'string', default: '8877' },
     } });
 const portText = process.env.PORT || values.port;

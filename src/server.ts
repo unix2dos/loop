@@ -1,14 +1,15 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
+import { errBudget } from './agent.ts';
 import type { Message, ModelCaller, Tool } from './agent.ts';
 import { checkExercise, codingExercise, codingReady, codingTask, prepareExercise } from './coding.ts';
 import { conversationMessages } from './conversation.ts';
 import { HTTPModel } from './model.ts';
 import { locateRecord, openRecordEditor } from './record.ts';
-import { integerArgument, loadHistory, object, ordinaryDirectory, projectRoot, randomID, readStoredRun, runIDPattern, sortedSummaries, sourceRecords, summarizeRun, text } from './storage.ts';
+import { atomicWrite, integerArgument, loadHistory, object, ordinaryDirectory, projectRoot, randomID, readOrdinaryFile, readStoredRun, runIDPattern, sortedSummaries, sourceRecords, summarizeRun, text } from './storage.ts';
 import type { Run } from './storage.ts';
 import { RunTask } from './trace.ts';
 export const defaultTask = '先列出工作区文件，再读取与工具调用最相关的一份笔记。根据原文说明：模型提出工具调用之后，程序还要做什么？请注明文件名和原文依据，只读，不修改文件。';
@@ -66,6 +67,64 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
     const { history, skipped } = loadHistory(state), loaded = history.size;
     const { sources, buildID } = sourceRecords(), runs = new Map<string, Run>();
     const token = randomBytes(32).toString('hex');
+    const publicMode = process.env.LOOP_PUBLIC === '1';
+    const dailyLimit = Number(process.env.LOOP_PUBLIC_DAILY_REQUESTS ?? '100');
+    if (publicMode && (!Number.isSafeInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 10000))
+        throw new Error('invalid public daily request limit');
+    const quotaPath = join(state, 'public-quota.json');
+    type Quota = { day: string; total: number; visitors: Record<string, number> };
+    let quota: Quota = { day: '', total: 0, visitors: {} };
+    if (publicMode && existsSync(quotaPath)) {
+        const saved = object(JSON.parse(readOrdinaryFile(quotaPath, 1024 * 1024).toString()));
+        const visitors = object(saved.visitors);
+        if (typeof saved.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(saved.day) || !Number.isSafeInteger(saved.total) || (saved.total as number) < 0 ||
+            Object.entries(visitors).some(([id, count]) => !/^[a-f0-9]{64}$/.test(id) || !Number.isSafeInteger(count) || (count as number) < 0))
+            throw new Error('invalid public quota');
+        quota = saved as Quota;
+    }
+    const currentQuota = () => {
+        const day = new Date().toISOString().slice(0, 10);
+        if (!quota.day || day > quota.day)
+            quota = { day, total: 0, visitors: {} };
+        return quota;
+    };
+    const quotaAvailable = (visitor: string) => {
+        const today = currentQuota();
+        // ponytail: browser identity can be reset; the global cap still bounds total model calls. Add stronger identity if abuse warrants it.
+        return today.total < dailyLimit && (today.visitors[visitor] ?? 0) < 12;
+    };
+    const takeQuota = (visitor: string) => {
+        if (!quotaAvailable(visitor))
+            throw errBudget;
+        const today = currentQuota();
+        const next = { day: today.day, total: today.total + 1, visitors: { ...today.visitors, [visitor]: (today.visitors[visitor] ?? 0) + 1 } };
+        atomicWrite(quotaPath, JSON.stringify(next));
+        quota = next;
+    };
+    const visitorFor = (req: IncomingMessage, res: ServerResponse, create: boolean): string => {
+        let value = /(?:^|;\s*)__Host-loop_visitor=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie ?? '')?.[1];
+        if (!value) {
+            if (!create)
+                throw new HTTPError(403, '请刷新页面以建立访客会话');
+            value = randomBytes(32).toString('hex');
+            res.setHeader('Set-Cookie', `__Host-loop_visitor=${value}; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax; Secure`);
+        }
+        return createHash('sha256').update(value).digest('hex');
+    };
+    let nextSweep = 0;
+    const expireHistory = () => {
+        if (!publicMode || Date.now() < nextSweep)
+            return;
+        const cutoff = Date.now() / 1000 - 7 * 86400;
+        for (const [id, summary] of history) {
+            if (!summary.visitor_id || summary.created_at >= cutoff || runs.get(id)?.status === 'running')
+                continue;
+            rmSync(join(state, id), { recursive: true });
+            history.delete(id);
+            runs.delete(id);
+        }
+        nextSweep = Date.now() + 3600 * 1000;
+    };
     const tools = JSON.parse(readFileSync(join(projectRoot, 'tools.json'), 'utf8')) as Tool[];
     const codingTools = JSON.parse(readFileSync(join(projectRoot, 'coding-tools.json'), 'utf8')) as Tool[];
     // Cache assets alongside the source snapshot, so editing disk cannot change a running build's UI.
@@ -92,6 +151,8 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
         }
         if (!allowedRequest(req))
             throw new HTTPError(403, '仅接受同源请求');
+        expireHistory();
+        const visitor = publicMode && path.startsWith('/api/') ? visitorFor(req, res, path === '/api/config') : undefined;
         if (req.method === 'GET') {
             const asset = assets.get(path);
             if (asset) {
@@ -104,20 +165,24 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
             }
             if (path === '/api/config') {
                 const available = process.env.LOOP_PUBLIC !== '1' && localRequest(req), message = available ? await codingReady() : 'Coding 练习只在本机提供';
-                respond(res, 200, { workspace, state_dir: state, model: process.env.OPENAI_MODEL ?? '', configured: !!(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL), token, default_task: defaultTask,
-                    coding_available: available, coding_ready: available && !message, coding_message: message, coding_task: codingTask, history: { loaded, skipped } });
+                respond(res, 200, { public_mode: publicMode, workspace, state_dir: publicMode ? '' : state, model: process.env.OPENAI_MODEL ?? '', configured: !!(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL), token, default_task: defaultTask,
+                    coding_available: available, coding_ready: available && !message, coding_message: message, coding_task: codingTask,
+                    history: { loaded: visitor ? [...history.values()].filter(item => item.visitor_id === visitor).length : loaded, skipped: visitor ? 0 : skipped } });
                 return;
             }
             if (path === '/api/runs') {
                 for (const [id, run] of runs)
                     history.set(id, summarizeRun(run));
-                respond(res, 200, sortedSummaries(history));
+                respond(res, 200, sortedSummaries(history).filter(item => !visitor || item.visitor_id === visitor));
                 return;
             }
             const match = /^\/api\/runs\/([a-f0-9]{32})$/.exec(path);
             if (match) {
                 try {
-                    respond(res, 200, runs.get(match[1]) ?? readStoredRun(state, match[1]));
+                    const run = runs.get(match[1]) ?? readStoredRun(state, match[1]);
+                    if (visitor && run.visitor_id !== visitor)
+                        throw new Error('other visitor');
+                    respond(res, 200, run);
                 }
                 catch {
                     throw new HTTPError(404, '运行记录不存在、尚未保存或格式无效');
@@ -170,6 +235,8 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
             throw new HTTPError(400, '练习参数无效；请从新的 Coding 练习开始');
         if (exercise && (!data.approve_exercise || process.env.LOOP_PUBLIC === '1' || !localRequest(req)))
             throw new HTTPError(403, 'Coding 练习需要本机用户明确授权');
+        if (visitor && !quotaAvailable(visitor))
+            throw new HTTPError(429, '今日公共模型额度已用完，请稍后再试');
         if (active)
             throw new HTTPError(409, '已有任务运行中，请等它结束');
         // ponytail: one active run, reserved before async setup. Add a queue only when parallel tasks are a product requirement.
@@ -180,8 +247,6 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
             if (parentID) {
                 if (!runIDPattern.test(parentID))
                     throw new HTTPError(400, '上一轮记录无效');
-                if ([...history.values()].some(item => item.parent_run_id === parentID))
-                    throw new HTTPError(409, '这段对话已有后续消息，请刷新后继续');
                 let parent: Run;
                 try {
                     parent = readStoredRun(state, parentID);
@@ -189,6 +254,10 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
                 catch {
                     throw new HTTPError(400, '上一轮记录尚未保存或不可用，无法继续对话');
                 }
+                if (visitor && parent.visitor_id !== visitor)
+                    throw new HTTPError(404, '上一轮记录不存在');
+                if ([...history.values()].some(item => item.parent_run_id === parentID))
+                    throw new HTTPError(409, '这段对话已有后续消息，请刷新后继续');
                 if (parent.exercise === codingExercise) {
                     if (process.env.LOOP_PUBLIC === '1' || !localRequest(req))
                         throw new HTTPError(403, 'Coding 练习仅限本机访问');
@@ -217,6 +286,8 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
             }
             if (exercise)
                 run.exercise = codingExercise;
+            if (visitor)
+                run.visitor_id = visitor;
             if (run.exercise) {
                 const error = await codingReady();
                 if (error)
@@ -241,7 +312,8 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
             }
             submitted = true;
             // A run belongs to the server, not the browser connection that submitted it.
-            void RunTask(new AbortController().signal, run, transport.call, run.exercise ? codingTools : tools, join(state, run.id), prior)
+            const call: ModelCaller = visitor ? async (signal, input) => { takeQuota(visitor); return transport.call(signal, input); } : transport.call;
+            void RunTask(new AbortController().signal, run, call, run.exercise ? codingTools : tools, join(state, run.id), prior)
                 .catch(() => { run.status = 'failed'; run.error = { error_type: 'StorageError', message: '本地记录或执行异常' }; })
                 .finally(() => { history.set(run.id, summarizeRun(run)); active = false; });
             respond(res, 202, { id: run.id });

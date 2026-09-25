@@ -9,7 +9,8 @@ COPY assets/branding/loop-icon-v1.png assets/branding/loop-icon-v1.png
 COPY testdata/ts-average testdata/ts-average
 COPY workspace workspace
 RUN npm run build
+RUN mkdir -p /data/loop-runs && chown 65532:65532 /data/loop-runs
 ENV LOOP_PUBLIC=1 PORT=8080
 USER 65532:65532
 EXPOSE 8080
-CMD ["node", "--use-env-proxy", "src/main.ts", "--workspace", "/app/workspace", "--state-dir", "/tmp/loop-runs"]
+CMD ["node", "--use-env-proxy", "src/main.ts", "--workspace", "/app/workspace", "--state-dir", "/data/loop-runs"]

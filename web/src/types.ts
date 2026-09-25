@@ -23,6 +23,7 @@ export interface TraceEvent {
 }
 export interface RunSummary {
   exercise?: "ts-average";
+  visitor_id?: string;
   parent_run_id?: string;
   conversation_id?: string;
   conversation_turn?: number;
@@ -48,6 +49,7 @@ export interface Run extends RunSummary {
   build_id?: string;
 }
 export interface Config {
+  public_mode: boolean;
   workspace: string;
   state_dir: string;
   model: string;
