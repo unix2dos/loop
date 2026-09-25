@@ -173,7 +173,8 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
             if (path === '/api/runs') {
                 for (const [id, run] of runs)
                     history.set(id, summarizeRun(run));
-                respond(res, 200, sortedSummaries(history).filter(item => !visitor || item.visitor_id === visitor));
+                const summaries = sortedSummaries(history).filter(item => !visitor || item.visitor_id === visitor);
+                respond(res, 200, visitor ? summaries.map(({ visitor_id: _owner, ...item }) => item) : summaries);
                 return;
             }
             const match = /^\/api\/runs\/([a-f0-9]{32})$/.exec(path);
@@ -182,7 +183,12 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
                     const run = runs.get(match[1]) ?? readStoredRun(state, match[1]);
                     if (visitor && run.visitor_id !== visitor)
                         throw new Error('other visitor');
-                    respond(res, 200, run);
+                    if (visitor) {
+                        const { visitor_id: _owner, ...visible } = run;
+                        respond(res, 200, visible);
+                    }
+                    else
+                        respond(res, 200, run);
                 }
                 catch {
                     throw new HTTPError(404, '运行记录不存在、尚未保存或格式无效');

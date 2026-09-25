@@ -150,7 +150,7 @@ test('public visitors see only their own runs; daily model quota survives restar
     const first = await post(a, { task: 'a' });
     assert.equal(first.status, 202);
     const id = (await first.json()).id as string;
-    await finished(base, id, a);
+    assert.equal('visitor_id' in await finished(base, id, a), false);
     assert.deepEqual((await (await fetch(base + '/api/runs', { headers: { Cookie: b } })).json() as Run[]).map(run => run.id), []);
     assert.equal((await fetch(base + '/api/runs/' + id, { headers: { Cookie: b } })).status, 404);
     assert.equal((await post(b, { task: 'steal', parent_run_id: id })).status, 404);
