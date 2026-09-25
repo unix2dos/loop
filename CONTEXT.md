@@ -63,3 +63,7 @@ _Avoid_: Model self-report, run completion alone
 **Learning Progress**:
 The author's ability to predict, explain, and independently change Agent behavior. AI may write most code; hearing an explanation alone does not establish mastery.
 _Avoid_: Lines hand-written, successful assistant test run, repository size
+
+**Real Task**:
+A piece of work the author would do even if Loop did not exist.
+_Avoid_: Built-in coding exercise, demo prompt, browsing a Historical Run, a conversation created only to produce a trace
