@@ -714,6 +714,7 @@ async function initialize(): Promise<void> {
     if (config.public_mode) {
       $("home-eyebrow").textContent = "LOOP / 公开体验";
       $("home-note").textContent = "匿名体验：任务和轨迹仅当前浏览器可见，保留 7 天。内容会发送给页面所示模型服务；请勿输入隐私或机密信息。免费额度用完后暂停使用。";
+      $("public-composer-note").hidden = false;
     }
     $("workspace-label").textContent = "只读工作区 · " + config.workspace;
     $("workspace-label").title = config.workspace;
