@@ -18,7 +18,7 @@ const escapes: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;"
 const esc = (value: unknown): string => String(value ?? "").replace(/[&<>"']/g, char => escapes[char]);
 const pretty = (value: unknown): string => esc(JSON.stringify(value, null, 2));
 const roles: Record<EventKind, string> = { input: "用户", model: "模型", tool: "工具", control: "程序" };
-const statuses: Record<RunStatus, string> = { running: "运行中", completed: "循环已结束", budget_exhausted: "模型额度已用完", failed: "运行失败" };
+const statuses: Record<RunStatus, string> = { running: "运行中", completed: "循环已结束", budget_exhausted: "请求已达上限", failed: "运行失败" };
 type DetailTab = "overview" | "io" | "code";
 let config: Config | null = null, run: Run | null = null;
 let newExercise = false;
@@ -712,6 +712,7 @@ async function initialize(): Promise<void> {
   try {
     config = await api<Config>("/api/config");
     if (config.public_mode) {
+      try { if (localStorage.getItem("loop.maxRequests") === null) maxRequests = 6; } catch { /* Browser storage is optional. */ }
       $("home-eyebrow").textContent = "LOOP / 公开体验";
       $("home-note").textContent = "匿名体验：任务和轨迹仅当前浏览器可见，保留 7 天。内容会发送给页面所示模型服务；请勿输入隐私或机密信息。免费额度用完后暂停使用。";
       $("public-composer-note").hidden = false;

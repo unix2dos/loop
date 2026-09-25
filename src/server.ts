@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
-import { errBudget } from './agent.ts';
+import { errPublicQuota } from './agent.ts';
 import type { Message, ModelCaller, Tool } from './agent.ts';
 import { checkExercise, codingExercise, codingReady, codingTask, prepareExercise } from './coding.ts';
 import { conversationMessages } from './conversation.ts';
@@ -94,8 +94,8 @@ export function NewServer(workspace: string, state: string, factory: CallerFacto
         return today.total < dailyLimit && (today.visitors[visitor] ?? 0) < 12;
     };
     const takeQuota = (visitor: string) => {
-        if (!quotaAvailable(visitor))
-            throw errBudget;
+		if (!quotaAvailable(visitor))
+			throw errPublicQuota;
         const today = currentQuota();
         const next = { day: today.day, total: today.total + 1, visitors: { ...today.visitors, [visitor]: (today.visitors[visitor] ?? 0) + 1 } };
         atomicWrite(quotaPath, JSON.stringify(next));

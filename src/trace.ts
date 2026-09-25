@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { Message, ModelCaller, Tool, ToolExecutor } from './agent.ts';
-import { errBudget, RunLoop } from './agent.ts';
+import { errBudget, errPublicQuota, RunLoop } from './agent.ts';
 import { BuildTurnMessages, readonlyAccess } from './context.ts';
 import { codingAccess, codingExercise, ExecuteCoding, ExecutionError } from './coding.ts';
 import { errorDetails } from './model.ts';
@@ -79,7 +79,7 @@ export async function RunTask(signal: AbortSignal, run: Run, call: ModelCaller, 
     catch (error) {
         failure = error;
     }
-    const status = failure === undefined ? 'completed' : failure === errBudget ? 'budget_exhausted' : 'failed';
+	const status = failure === undefined ? 'completed' : failure === errBudget || failure === errPublicQuota ? 'budget_exhausted' : 'failed';
     const detail = failure === undefined ? null : errorDetails(failure);
     try {
         const event = begin('control', status === 'completed' ? '正常结束' : status === 'budget_exhausted' ? '达到请求上限' : '运行失败', { model_requests: run.model_requests, max_requests: run.max_requests }, 'loop', '正常结束只说明循环结束，不证明回答正确或任务验收通过。');
